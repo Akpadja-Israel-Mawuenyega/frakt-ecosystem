@@ -4,6 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from logging_config import logger
+from generator import generate_svg_from_template
 import json
 
 from .database import init_db, get_db
@@ -17,7 +18,7 @@ from .generator import generate_svg_from_template
 init_db()
 
 app = FastAPI(
-    title="VizMaker SaaS API", 
+    title="Frakt API", 
     description="Dynamic SVG and Animation Generation Service"
 )
 

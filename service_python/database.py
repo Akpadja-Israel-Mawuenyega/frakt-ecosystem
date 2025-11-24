@@ -15,7 +15,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # --- 2. Engine setup ---
 engine = create_engine(
     DATABASE_URL,
-    echo=True
+    echo=False
 )
 
 # --- 3. Session factory
@@ -26,7 +26,6 @@ SessionLocal = sessionmaker(
 
 # --- 4. Initialization ---
 def init_db():
-    print("Connecting to database...")
     logger.info("Connecting to MySQL and checking/creating tables...") 
     
     try:
@@ -38,20 +37,24 @@ def init_db():
     
 # --- 5. Dependency for FastAPI ---
 def get_db():
+    logger.info("================ REQUEST START ================")
+    
     db = SessionLocal()
     try:
         yield db
     except:
-        db.rollback() 
+        db.rollback()
+        logger.error("Database transaction rolled back due to error.") 
         raise
     finally:
         db.close()
         logger.info("Database connection closed.")
+        logger.info("================ REQUEST END ================")
 
 if __name__ == "__main__":
     try:
         init_db()
     except Exception as e:
-        print("\n--- EXTERNAL STARTUP ERROR CATCHED ---")
-        print(f"The program crashed outside of the init_db try block. Error: {e}")
-        print("--------------------------------------\n")
+        logger.warning("\n--- EXTERNAL STARTUP ERROR CATCHED ---")
+        logger.warning(f"The program crashed outside of the init_db try block. Error: {e}")
+        logger.info("--------------------------------------\n")
