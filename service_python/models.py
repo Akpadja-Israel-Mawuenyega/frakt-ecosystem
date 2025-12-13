@@ -1,5 +1,5 @@
 # service_python/models.py
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
 
@@ -28,7 +28,9 @@ class SVGTemplate(Base):
     __tablename__ = "templates"
     
     id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey('customers.id'), nullable=True)
     template_name = Column(String(100), unique=True, index=True)
+    
     # Dynamic ruleset or logic executed
     template_code =  Column(String(2048))
     required_params = Column(String(255))

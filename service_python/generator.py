@@ -4,6 +4,9 @@ from typing import Dict, Any, Optional
 from logging_config import logger
 import json
 import math
+import numpy as np
+import scipy
+import pandas
 
 # --- 1. Custom Exception for Template Execution Failures ---
 class TemplateExecutionError(Exception):
@@ -36,7 +39,10 @@ RESTRICTED_BUILTINS = {
     
     # ALLOWED modules
     'json': json,
-    'math': math,   
+    'math': math,
+    'np': np,
+    'pandas': pandas,
+    'scipy': scipy,   
 }
 
 # --- 3. Core generator function ---
@@ -67,7 +73,7 @@ def generate_svg_from_template(
         
     svg_content = execution_scope.get('svg_output')
     
-    if not svg_content or isinstance(svg_content, str):
+    if not svg_content or not isinstance(svg_content, str):
         logger.error("Template finished execution but did not set the required 'svg_output' string variable.")
         raise TemplateExecutionError("Template code must assign the final SVG string to the 'svg_output' variable.")
     
