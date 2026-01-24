@@ -35,8 +35,7 @@ SessionLocal = sessionmaker(
 def init_db():
     logger.info("Initializing database schema...")
     try:
-        with engine.connect() as conn:
-            Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
         logger.info("Database initialization successful.")
     except Exception as e:
         logger.critical(f"DATABASE CONNECTION FAILED: {e}")

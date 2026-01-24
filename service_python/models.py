@@ -9,10 +9,11 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy import UniqueConstraint
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 
 class Customer(Base):
@@ -35,7 +36,7 @@ class Customer(Base):
 
 class SVGTemplate(Base):
     __tablename__ = "templates"
-    __table_args = (
+    __table_args__ = (
         UniqueConstraint("owner_id", "template_name", name="uq_owner_template"),
     )
 
