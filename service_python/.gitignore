@@ -2,4 +2,6 @@
 /.pytest_cache
 /.venv
 /logs
+/dashboard.html
+/complex_graph.svg
 
