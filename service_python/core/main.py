@@ -13,6 +13,7 @@ from .database import init_db, get_db
 from .tier_config import TIER_LIMITS
 from .models import Customer, SVGTemplate
 from .schemas import SvgGenerationRequest, TemplateCreate
+from .ai_engine import PredictiveEngine
 
 
 def get_customer_tier_key(request: Request):
@@ -97,7 +98,7 @@ def generate_svg(
     db: Session = Depends(get_db),
 ):
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
-    
+
     if customer.usage_count >= tier_config["quota"]:
         raise HTTPException(status_code=403, detail="Quota exceeded.")
 
@@ -142,3 +143,75 @@ def generate_svg(
         raise HTTPException(
             status_code=500, detail="Internal server error during generation."
         )
+
+
+@app.post("/generate-predictive")
+@limiter.limit("10/minute")
+def generate_predictive_svg(
+    request: SvgGenerationRequest,
+    mode: str = "both",
+    customer: Customer = Depends(get_current_customer),
+    db: Session = Depends(get_db),
+):
+    """
+    Layers AI predictions over standard templates using a hybrid sandbox.
+    Separates AI processing from SVG generation for kernel protection.
+    """
+    tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
+    if customer.usage_count >= tier_config["quota"]:
+        raise HTTPException(status_code=403, detail="Quota exceeded.")
+
+    template = (
+        db.query(SVGTemplate)
+        .filter(SVGTemplate.template_name == request.template_name)
+        .one_or_none()
+    )
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found.")
+
+    if template.owner_id and template.owner_id != customer.id:
+        raise HTTPException(
+            status_code=403, detail="Access denied to private template."
+        )
+
+    layers = {}
+
+    try:
+        if mode in ["normal", "both"]:
+            layers["base"] = generate_svg_from_template(
+                template_code=template.template_code,
+                params={**request.params, "is_predictive": False},
+                metadata=request.metadata,
+            )
+
+        if mode in ["predictive", "both"]:
+            raw_points = request.params.get("points", [])
+
+            ai_results = PredictiveEngine.get_trend(raw_points)
+
+            if "error" in ai_results:
+                raise HTTPException(status_code=400, detail=ai_results["error"])
+
+            layers["overlay"] = generate_svg_from_template(
+                template_code=template.template_code,
+                params=ai_results,
+                metadata=request.metadata,
+            )
+
+        db.execute(
+            update(Customer)
+            .where(Customer.id == customer.id)
+            .values(usage_count=Customer.usage_count + 1)
+        )
+        db.commit()
+
+        return {"status": "success", "layers": layers}
+
+    except TemplateExecutionError as tee:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Execution Error: {str(tee)}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Predictive failure for customer {customer.id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error.")
