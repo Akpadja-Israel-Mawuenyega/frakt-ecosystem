@@ -30,9 +30,6 @@ ALLOWED_FUNCS = {
     "range": range,
     "sum": sum,
     "round": round,
-    "enumerate": enumerate,
-    "zip": zip,
-    "abs": abs,
 }
 
 
