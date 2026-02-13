@@ -13,6 +13,9 @@ SessionLocal = sessionmaker(bind=engine)
 
 
 def seed():
+    """
+    Database seeder
+    """
     db = SessionLocal()
     try:
         if not db.query(Customer).filter_by(api_key="continental_777").first():
@@ -32,16 +35,15 @@ def seed():
                 required_params='["radius", "color"]',
             )
             db.add(sample_template)
-            
-        
+
         # Add this inside your seed() function in seed_db.py
         if not db.query(SVGTemplate).filter_by(template_name="sparkline").first():
             new_tmpl = SVGTemplate(
                 template_name="sparkline",
                 template_code="<svg width='200' height='60'><polyline fill='none' stroke='{{ color }}' stroke-width='3' points='{{ points }}'/></svg>",
-                required_params='{"color": "string", "points": "string"}'
-            ) 
-            db.add(new_tmpl)  
+                required_params='{"color": "string", "points": "string"}',
+            )
+            db.add(new_tmpl)
 
         db.commit()
         print("Database seeded successfully!")

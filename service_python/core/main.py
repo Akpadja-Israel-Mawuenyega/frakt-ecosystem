@@ -17,16 +17,18 @@ from schemas import SvgGenerationRequest, TemplateCreate
 from ai_engine import PredictiveEngine
 
 
-def get_customer_tier_key(request: Request):
+def get_customer_api_key(request: Request):
+    """Helper method that gets the API key of a customer."""
     api_key = request.headers.get("x-api-key")
     return api_key or get_remote_address(request)
 
 
-limiter = Limiter(key_func=get_customer_tier_key)
+limiter = Limiter(get_customer_api_key)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Asynchronous app lifetime manager."""
     logger.info("Starting Frakt API...")
     init_db()
     yield
@@ -57,6 +59,7 @@ async def get_current_customer(
     x_api_key: str = Header(..., description="Customer's API Key"),
     db: Session = Depends(get_db),
 ) -> Customer:
+    """Authenticates the customer using the **API key** as a header."""
     customer = db.query(Customer).filter(Customer.api_key == x_api_key).one_or_none()
     if not customer or not customer.is_active:
         logger.warning(f"Unauthorized access attempt: {x_api_key}")
@@ -70,11 +73,12 @@ async def get_current_customer(
 @app.post("/templates", status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 def create_template(
-    request: Request,  # Added this to fix the limiter crash
+    request: Request,
     template_data: TemplateCreate,
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ):
+    """Creates a template at the endpoint **/templates**."""
     exists = (
         db.query(SVGTemplate.id)
         .filter(
@@ -106,6 +110,7 @@ def generate_svg(
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ):
+    """Controller method at **/generate** endpoint. Handles SVG generation request."""
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
     if customer.usage_count >= tier_config["quota"]:
         raise HTTPException(status_code=403, detail="Quota exceeded.")
@@ -156,6 +161,7 @@ def generate_predictive_svg(
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
 ):
+    """Contorller at **/generate-predictive** endpoint. Generates predictive SVG using the Linear Regression model in ai_engine.py"""
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
     if customer.usage_count >= tier_config["quota"]:
         raise HTTPException(status_code=403, detail="Quota exceeded.")

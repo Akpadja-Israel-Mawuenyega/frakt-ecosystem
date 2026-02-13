@@ -4,6 +4,10 @@ from typing import Dict, Optional, Any
 
 
 class SvgGenerationRequest(BaseModel):
+    """
+    Class that denotes a request to generate an SVG using the Pydantic Base class
+    """
+
     template_name: str = Field(..., description="Name of the template to generate.")
     params: Dict[str, Any] = Field(..., description="Data pushed from the client's DB.")
     metadata: Optional[Dict[str, Any]] = Field(
@@ -12,6 +16,8 @@ class SvgGenerationRequest(BaseModel):
 
 
 class TemplateCreate(BaseModel):
+    """This class represents the template itself."""
+
     template_name: str = Field(..., min_length=1, max_length=100)
     template_code: str = Field(..., min_length=1)
     required_params: Dict[str, Any] = Field(
