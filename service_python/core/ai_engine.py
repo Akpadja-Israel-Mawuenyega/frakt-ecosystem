@@ -1,7 +1,7 @@
 # ai_engine.py
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from .logging_config import logger
+from logging_config import logger
 
 
 class PredictiveEngine:

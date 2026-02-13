@@ -3,9 +3,9 @@ import os
 import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base
+from core.models import Base
 from dotenv import load_dotenv
-from logging_config import logger
+from core.logging_config import logger
 
 load_dotenv()
 

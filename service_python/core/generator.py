@@ -4,13 +4,14 @@ import json
 import math
 from typing import Dict, Any, Optional
 from concurrent.futures import ProcessPoolExecutor, TimeoutError
-from .logging_config import logger
+from logging_config import logger
 
 
 class TemplateExecutionError(Exception):
     """Custom exception for template-specific failures."""
 
     pass
+
 
 SAFE_MODULES = {
     "json": json,
@@ -30,6 +31,7 @@ ALLOWED_FUNCS = {
     "range": range,
     "sum": sum,
     "round": round,
+    "enumerate": enumerate,
 }
 
 
