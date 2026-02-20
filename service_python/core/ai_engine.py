@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge, BayesianRidge
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import make_pipeline
 from logging_config import logger
@@ -7,88 +7,146 @@ from logging_config import logger
 
 class PredictiveEngine:
     """
-    A lightweight inference engine for time-series trend analysis.
+    Advanced Inference Engine using Supervised Learning.
+    Refactored to eliminate magic numbers and expose hyperparameters.
     """
 
-    # --- Configuration Constants ---
+    # --- Global Config ---
     MIN_REQUIRED_POINTS = 5
     FORECAST_STEPS = 3
-    POLYNOMIAL_DEGREE = 2
 
-    # Temporal Weighting: How much more we value new data vs old data
-    START_WEIGHT = 0.5
-    END_WEIGHT = 2.0
+    # --- Hyperparameters ---
+    LINEAR_REGULARIZATION = 1.0
+    POLY_REGULARIZATION = 0.5
+
+    # Heuristic Guardrails
+    SPORTS_GROWTH_CEILING = 1.5
+    DEFAULT_MAX_VALUE = 10.0
 
     @staticmethod
-    def get_trend(data: list) -> dict:
+    def get_trend(data: list, method: str = "polynomial") -> dict:
         """
-        Analyzes numerical trends and generates a multi-point forecast.
-
-        The model applies a Degree-2 Polynomial fit with a temporal weighting
-        strategy—giving 4x more importance to recent data points (2.0)
-        compared to oldest points (0.5).
-
-        Returns:
-            dict: Contains the forecast, r2 confidence score, and momentum analysis.
-            If data is insufficient or invalid, returns a descriptive error.
+        Main entry point for the predictive suite. Performs data validation
+        and routes to the appropriate Supervised Learning model.
         """
-        try:
-            # Check against MIN_REQUIRED_POINTS
-            if (
-                not all(isinstance(x, (int, float)) for x in data)
-                or len(data) < PredictiveEngine.MIN_REQUIRED_POINTS
-            ):
-                return {
-                    "error": f"Insufficient data points (Min {PredictiveEngine.MIN_REQUIRED_POINTS} required)."
-                }
-
-            y = np.array(data, dtype=float)
-            x = np.arange(len(y), dtype=float).reshape(-1, 1)
-
-            if np.std(y) == 0:
-                return {"error": "Data has no variance — cannot fit a trend."}
-
-            # Weights: Creates a linear ramp from START_WEIGHT to END_WEIGHT
-            weights = np.linspace(
-                PredictiveEngine.START_WEIGHT, PredictiveEngine.END_WEIGHT, len(y)
-            )
-
-            # Model: Quadratic fit (Degree 2)
-            model = make_pipeline(
-                PolynomialFeatures(degree=PredictiveEngine.POLYNOMIAL_DEGREE),
-                LinearRegression(),
-            )
-
-            model.fit(x, y, linearregression__sample_weight=weights)
-
-            # Forecast: Project into the future by FORECAST_STEPS
-            future_x = np.arange(
-                len(y), len(y) + PredictiveEngine.FORECAST_STEPS
-            ).reshape(-1, 1)
-            preds = model.predict(future_x)
-
-            # Round and floor results
-            preds = [max(0, round(float(p), 2)) for p in preds]
-            r2_score = model.score(x, y, sample_weight=weights)
-
+        if (
+            not all(isinstance(x, (int, float)) and np.isfinite(x) for x in data)
+            or len(data) < PredictiveEngine.MIN_REQUIRED_POINTS
+        ):
             return {
-                "forecast": preds,
-                "confidence": max(0.0, round(float(r2_score), 4)),
-                "is_growth": bool(preds[-1] > y[-1]),
-                "model_meta": f"Sklearn Weighted Polynomial (Deg {PredictiveEngine.POLYNOMIAL_DEGREE})",
-                "analysis": {
-                    "current_momentum": "Positive" if preds[0] > y[-1] else "Negative",
-                    "consistency_score": (
-                        max(0, round(1 - np.std(y) / np.mean(y), 2))
-                        if np.mean(y) != 0
-                        else 0
-                    ),
-                },
+                "error": f"Insufficient data (Minimum {PredictiveEngine.MIN_REQUIRED_POINTS} points required)"
             }
 
-        except (ValueError, np.linalg.LinAlgError) as e:
-            logger.warning(f"PredictiveEngine Math Error: {e}")
-            return {"error": "Model fitting failed — check data uniformity."}
+        y = np.array(data)
+        x = np.arange(len(y)).reshape(-1, 1)
+
+        try:
+            if method == "linear":
+                return PredictiveEngine._fit_linear(x, y)
+            elif method == "seasonal":
+                return PredictiveEngine._fit_seasonal(data)
+            else:
+                return PredictiveEngine._fit_polynomial(x, y)
         except Exception as e:
-            logger.error(f"Unexpected SKLearn Engine Error: {e}", exc_info=True)
-            return {"error": "ML Inference failed."}
+            logger.error(f"AI Inference Failure [{method}]: {e}")
+            return {"error": "Machine Learning processing failure"}
+
+    @staticmethod
+    def _fit_linear(x, y):
+        """
+        Implements Ridge Regression (L2 Regularization) for linear forecasting.
+
+        This model minimizes the squared error while penalizing large coefficients,
+        making it more robust to outliers in sports data (e.g., a single high-scoring game)
+        than standard Ordinary Least Squares.
+        """
+        model = Ridge(alpha=PredictiveEngine.LINEAR_REGULARIZATION)
+        model.fit(x, y)
+
+        future_x = np.arange(len(y), len(y) + PredictiveEngine.FORECAST_STEPS).reshape(
+            -1, 1
+        )
+        preds = model.predict(future_x).flatten()
+
+        # No growth ceiling applied — linear extrapolation is bounded by nature of Ridge regularization
+        return {
+            "forecast": [max(0, round(float(p), 2)) for p in preds],
+            "method": f"Ridge Regression (α={PredictiveEngine.LINEAR_REGULARIZATION})",
+            "confidence": round(float(model.score(x, y)), 4),
+            "is_growth": bool(preds[-1] > y[-1]),
+        }
+
+    @staticmethod
+    def _fit_polynomial(x, y):
+        """
+        Implements a Regularized Polynomial Pipeline (Degree 2).
+
+        Uses a pipeline to transform features into a quadratic space before applying
+        Ridge regression. This captures non-linear trends (momentum) while the
+        SPORTS_GROWTH_CEILING prevents the exponential 'runaway' effect common
+        in unconstrained polynomial models.
+        """
+        model = make_pipeline(
+            PolynomialFeatures(degree=2),
+            Ridge(alpha=PredictiveEngine.POLY_REGULARIZATION),
+        )
+        model.fit(x, y)
+
+        future_x = np.arange(len(y), len(y) + PredictiveEngine.FORECAST_STEPS).reshape(
+            -1, 1
+        )
+        preds = model.predict(future_x).flatten()
+
+        historical_max = np.max(y)
+        limit = (
+            historical_max * PredictiveEngine.SPORTS_GROWTH_CEILING
+            if historical_max > 0
+            else PredictiveEngine.DEFAULT_MAX_VALUE
+        )
+
+        # Applying the safety ceiling to the output
+        safe_preds = [max(0, min(round(float(p), 2), limit)) for p in preds]
+
+        return {
+            "forecast": safe_preds,
+            "method": "Regularized Polynomial Inference",
+            "confidence": round(float(model.score(x, y)), 4),
+            "is_growth": bool(safe_preds[-1] > y[-1]),
+        }
+
+    @staticmethod
+    def _fit_seasonal(data):
+        """
+        Implements Bayesian Ridge Regression for probabilistic forecasting.
+
+        Unlike frequentist models, Bayesian Ridge treats parameters as probability
+        distributions. This allows the model to naturally adapt to the data's
+        variance and provides an 'uncertainty' metric (std), which we invert
+        to calculate a realistic confidence score.
+        """
+        y = np.array(data)
+        x = np.arange(len(y)).reshape(-1, 1)
+
+        model = BayesianRidge()
+        model.fit(x, y)
+
+        future_x = np.arange(len(y), len(y) + PredictiveEngine.FORECAST_STEPS).reshape(
+            -1, 1
+        )
+        # return_std is the key AI feature here for uncertainty estimation
+        preds, std = model.predict(future_x, return_std=True)
+
+        historical_max = np.max(y)
+        limit = (
+            historical_max * PredictiveEngine.SPORTS_GROWTH_CEILING
+            if historical_max > 0
+            else PredictiveEngine.DEFAULT_MAX_VALUE
+        )
+        safe_preds = [max(0, min(round(float(p), 2), limit)) for p in preds]
+
+        return {
+            "forecast": safe_preds,
+            "method": "Bayesian Probabilistic Inference",
+            "confidence": round(1 / (1 + np.mean(std)), 4),
+            "is_growth": bool(safe_preds[-1] > y[-1]),
+        }

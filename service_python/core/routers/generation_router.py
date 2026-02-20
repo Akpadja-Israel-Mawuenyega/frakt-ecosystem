@@ -129,7 +129,7 @@ def generate_svg(
         raise HTTPException(status_code=500, detail="Internal server error.")
 
 
-@router.post("/generate-predictive")
+@router.post("/generate-predictive", status_code=status.HTTP_200_OK)
 @limiter.limit(get_tier_limit)
 def generate_predictive_svg(
     request: Request,
@@ -139,16 +139,17 @@ def generate_predictive_svg(
     db: Session = Depends(get_db),
 ):
     """
-    Advanced generation endpoint with integrated AI forecasting.
+    Premium Generation Endpoint with Adaptive AI Inference.
 
-    This controller performs a 'Charge-then-Execute' flow:
-    1. Validates template ownership.
-    2. Determines credit cost (AI modes are billed at 2x rate).
-    3. Performs an atomic SQL update to increment usage count while enforcing quota.
-    4. Runs the Linear Regression model via PredictiveEngine.
-    5. Dispatches data to the isolated ProcessPool sandbox for SVG rendering.
+    Engineering Flow:
+    1.  **Identity & Quota**: Validates API Key and checks remaining tier usage.
+    2.  **Model Selection**: Extracts 'ai_method' from metadata (defaults to polynomial).
+    3.  **Validation-First Inference**: Runs PredictiveEngine BEFORE charging the user.
+    4.  **Atomic Metering**: Increments usage count (2 credits) via Optimistic Concurrency.
+    5.  **Isolated Rendering**: Dispatches data + AI results to the sandboxed ProcessPool.
     """
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
+
     if customer.usage_count >= tier_config["quota"]:
         raise HTTPException(status_code=403, detail="Quota exceeded.")
 
@@ -160,26 +161,31 @@ def generate_predictive_svg(
     if not template:
         raise HTTPException(status_code=404, detail="Template not found.")
 
-    if template.owner_id is not None and template.owner_id != customer.id:
-        raise HTTPException(status_code=403, detail="Private template access denied.")
+    if template.owner_id and template.owner_id != customer.id:
+        raise HTTPException(
+            status_code=403, detail="Access denied to private template."
+        )
 
     try:
-        ai_results = None
         raw_points = data.params.get("points", [])
+        # User provides method in metadata: {"ai_method": "linear" | "polynomial" | "seasonal"}
+        requested_method = (data.metadata or {}).get("ai_method", "polynomial")
 
+        ai_results = None
         if mode in ["predictive", "both"]:
-            ai_results = PredictiveEngine.get_trend(raw_points)
+            ai_results = PredictiveEngine.get_trend(raw_points, method=requested_method)
             if "error" in ai_results:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ai_results["error"])
+                raise HTTPException(status_code=400, detail=ai_results["error"])
 
+        # 2. Package for Sandbox
         unified_params = {
             "base_data": raw_points,
             "mode": mode,
             "ai_results": ai_results,
         }
 
+        # 3. Atomic Billing (Premium Rate: 2 Credits)
         credits_to_deduct = 2 if mode in ["predictive", "both"] else 1
-
         result = db.execute(
             update(Customer)
             .where(Customer.id == customer.id)
@@ -188,27 +194,35 @@ def generate_predictive_svg(
         )
 
         if result.rowcount == 0:
-            raise HTTPException(status_code=403, detail="Quota exceeded.")
+            raise HTTPException(
+                status_code=403, detail="Quota exceeded during transaction."
+            )
 
+        # 4. Execute User-Code in Sandbox
         svg_content = generate_svg_from_template(
             template_code=template.template_code,
             params=unified_params,
             metadata=data.metadata,
         )
+
         db.commit()
 
         return Response(
             content=svg_content,
             media_type="image/svg+xml",
-            headers={"X-Layers-Generated": str(credits_to_deduct)},
+            headers={
+                "X-Usage-Charged": str(credits_to_deduct),
+                "X-AI-Model": ai_results.get("method", requested_method),
+            },
         )
+
     except HTTPException:
         db.rollback()
         raise
     except TemplateExecutionError as tee:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Execution Error: {str(tee)}")
+        raise HTTPException(status_code=400, detail=f"SVG Logic Error: {str(tee)}")
     except Exception as e:
         db.rollback()
-        logger.error(f"Predictive failure: {e}")
+        logger.error(f"Critical System Failure: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
