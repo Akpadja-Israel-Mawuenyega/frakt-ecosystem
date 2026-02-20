@@ -5,22 +5,54 @@ from typing import Dict, Optional, Any
 
 class SvgGenerationRequest(BaseModel):
     """
-    Class that denotes a request to generate an SVG using the Pydantic Base class
+    Data Transfer Object (DTO) for SVG generation requests.
+
+    This schema validates the payload sent by clients when they want
+    to render an SVG based on an existing template and their specific data.
     """
 
-    template_name: str = Field(..., description="Name of the template to generate.")
-    params: Dict[str, Any] = Field(..., description="Data pushed from the client's DB.")
+    template_name: str = Field(
+        ...,
+        description="The unique identifier/name of the stored template.",
+        example="revenue_dashboard_v1",
+    )
+    params: Dict[str, Any] = Field(
+        ...,
+        description="Dynamic data from the client's database to be injected into the template.",
+        example={"current_month": 4500, "previous_month": 3200},
+    )
     metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Styling info (colors, etc)."
+        default=None,
+        description="Optional styling overrides such as theme colors, branding, or chart dimensions.",
+        example={"color_scheme": "dark", "width": 800},
     )
 
 
 class TemplateCreate(BaseModel):
-    """This class represents the template itself."""
+    """
+    Schema for administrative template registration.
 
-    template_name: str = Field(..., min_length=1, max_length=100)
-    template_code: str = Field(..., min_length=1)
-    required_params: Dict[str, Any] = Field(
-        ..., description="Required param names mapped to a description or type hint."
+    Used when creating or updating the Python-based SVG templates
+    stored in the central repository.
+    """
+
+    template_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="A unique, URL-friendly name for the template.",
     )
-    metadata: Optional[Dict[str, str]] = None
+    template_code: str = Field(
+        ...,
+        min_length=1,
+        description="The sandboxed Python code that generates the SVG string.",
+    )
+    required_params: Dict[str, Any] = Field(
+        ...,
+        description="Mapping of parameter names to their expected types or descriptions for client-side validation.",
+        example={"data_points": "List of integers", "title": "String"},
+    )
+    metadata: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Additional context about the template (e.g., author, version, or category).",
+    )

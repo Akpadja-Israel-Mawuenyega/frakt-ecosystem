@@ -1,3 +1,4 @@
+#service_python/core/models.py
 from sqlalchemy import (
     Column,
     Integer,
@@ -12,6 +13,7 @@ from sqlalchemy import UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func
 
+
 class Base(DeclarativeBase):
     pass
 
@@ -25,7 +27,7 @@ class Customer(Base):
 
     is_active = Column(Boolean, default=True)
     usage_count = Column(Integer, default=0)
-    tier =  Column(String(20), default="free")
+    tier = Column(String(20), default="free")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -42,7 +44,7 @@ class SVGTemplate(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     owner_id = Column(
-        Integer, ForeignKey("customers.id", ondelete="CASCADE"), nullable=True
+        Integer, ForeignKey("customers.id", ondelete="CASCADE"), nullable=False
     )
     template_name = Column(String(100), index=True)
 

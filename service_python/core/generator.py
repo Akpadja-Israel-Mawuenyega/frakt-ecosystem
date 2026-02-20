@@ -1,5 +1,6 @@
 # service_python/generator.py
 
+import os
 import json
 import math
 from typing import Dict, Any, Optional
@@ -8,7 +9,9 @@ from logging_config import logger
 
 
 class TemplateExecutionError(Exception):
-    """Custom exception for template-specific failures."""
+    """
+    Custom exception raised when SVG template logic fails or violates safety constraints.
+    """
 
     pass
 
@@ -35,19 +38,23 @@ ALLOWED_FUNCS = {
 }
 
 
-executor = ProcessPoolExecutor(max_workers=4)
+executor = ProcessPoolExecutor(max_workers=os.cpu_count() or 2)
 
 
 def _worker_execute(
     template_code: str, params: Dict[str, Any], metadata: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
-    Internal helper that runs inside the child process.
-    Returns a dictionary to avoid string-parsing ambiguity.
+    Internal execution sandbox running in a separate OS process.
+
+    This function uses 'exec' within a restricted global scope to evaluate
+    user-provided Python code. It isolates the execution to prevent
+    infinite loops or crashes from affecting the main FastAPI application.
     """
     globals_scope = {"__builtins__": ALLOWED_FUNCS}
     globals_scope.update(SAFE_MODULES)
 
+    # REQUIRED: The template_code must assign the final SVG string to 'svg_output'
     execution_scope = {
         "params": params,
         "metadata": metadata or {},
@@ -65,8 +72,18 @@ def generate_svg_from_template(
     template_code: str, params: Dict[str, Any], metadata: Optional[Dict[str, Any]]
 ) -> str:
     """
-    The main entry point used by the FastAPI routes.
-    Dispatches code to a worker process and enforces a 2.0s timeout.
+    Orchestrates the SVG generation process with safety timeouts.
+
+    Submits the template code to the ProcessPoolExecutor and waits up to 2.0s
+    for completion. This ensures that 'Heavy' or 'Malicious' code (like
+    while True loops) is forcibly terminated, protecting system resources.
+
+    Returns:
+        str: The generated SVG string.
+
+    Raises:
+        TemplateExecutionError: If execution times out, fails logic, or
+                                fails to produce a valid string.
     """
     logger.info("Dispatching execution to isolated worker process...")
 

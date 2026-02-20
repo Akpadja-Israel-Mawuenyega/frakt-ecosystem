@@ -6,6 +6,13 @@ from dotenv import load_dotenv
 
 
 class FraktFormatter(logging.Formatter):
+    """
+    Custom logging formatter that adds visual emphasis to CRITICAL errors.
+
+    Wraps critical-level logs with a high-visibility separator to ensure
+    system-threatening issues are easily identifiable in large log files.
+    """
+
     SEP = "\n================= CRITICAL ERROR =================\n"
 
     def format(self, record):
@@ -22,6 +29,16 @@ LOG_FILE = os.path.join(LOG_DIR, "frakt.log")
 
 
 def setup_logging():
+    """
+    Initializes a multi-handler logging system for the application.
+
+    Configures:
+    1. A Console Handler for real-time stdout monitoring.
+    2. A Rotating File Handler to persist logs (5MB limit per file, 5 backups).
+    3. Custom formatting with timestamps and module tracking.
+    4. Suppression of verbose SQLAlchemy engine logs to WARNING level.
+    """
+
     logger = logging.getLogger("frakt_app")
     logger.setLevel(logging.INFO)
 
