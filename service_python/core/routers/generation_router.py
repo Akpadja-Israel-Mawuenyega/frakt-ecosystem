@@ -3,10 +3,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import update
+from httpx import AsyncClient
 
 from limiter_config import limiter
 from logging_config import logger
-from generator import generate_svg_from_template, TemplateExecutionError
 from middlewares import get_current_customer, get_tier_limit
 from database import get_db
 from tier_config import TIER_LIMITS
@@ -19,6 +19,10 @@ router = APIRouter(
     tags=["SVG Generation"],
     responses={404: {"description": "Not found"}},
 )
+
+
+def get_worker(request: Request) -> AsyncClient:
+    return request.app.state.worker_client
 
 
 @router.post("/templates", status_code=status.HTTP_201_CREATED)
@@ -55,7 +59,7 @@ def create_template(
 
 @router.post("/generate", status_code=status.HTTP_200_OK)
 @limiter.limit(get_tier_limit)
-def generate_svg(
+async def generate_svg(
     request: Request,
     data: SvgGenerationRequest,
     customer: Customer = Depends(get_current_customer),
@@ -108,11 +112,20 @@ def generate_svg(
         if result.rowcount == 0:
             raise HTTPException(status_code=403, detail="Quota exceeded.")
 
-        svg_content = generate_svg_from_template(
-            template_code=template.template_code,
-            params=data.params,
-            metadata=data.metadata,
-        )
+        worker_client = get_worker(request)
+        payload = {
+            "template_code": template.template_code,
+            "params": data.params,
+            "metadata": data.metadata,
+        }
+
+        response = await worker_client.post("/execute", json=payload, timeout=2.1)
+
+        if response.status_code != 200:
+            error_msg = response.json().get("detail", "Sandbox execution failed")
+            raise HTTPException(status_code=response.status_code, detail=error_msg)
+
+        svg_content = response.json()["output"]
 
         db.commit()
         return Response(
@@ -120,9 +133,10 @@ def generate_svg(
             media_type="image/svg+xml",
             headers={"Cache-Control": "no-cache"},
         )
-    except TemplateExecutionError as tee:
+
+    except HTTPException:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(tee))
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"Critical generation failure: {e}")
@@ -131,7 +145,7 @@ def generate_svg(
 
 @router.post("/generate-predictive", status_code=status.HTTP_200_OK)
 @limiter.limit(get_tier_limit)
-def generate_predictive_svg(
+async def generate_predictive_svg(
     request: Request,
     data: SvgGenerationRequest,
     mode: str = "both",
@@ -199,12 +213,21 @@ def generate_predictive_svg(
             )
 
         # 4. Execute User-Code in Sandbox
-        svg_content = generate_svg_from_template(
-            template_code=template.template_code,
-            params=unified_params,
-            metadata=data.metadata,
-        )
+        worker_client = get_worker(request)
+        payload = {
+            "template_code": template.template_code,
+            "params": unified_params,
+            "metadata": data.metadata,
+        }
 
+        response = await worker_client.post("/execute", json=payload, timeout=2.1)
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=400, detail=response.json().get("detail", "Logic Error")
+            )
+
+        svg_content = response.json()["output"]
         db.commit()
 
         return Response(
@@ -219,9 +242,6 @@ def generate_predictive_svg(
     except HTTPException:
         db.rollback()
         raise
-    except TemplateExecutionError as tee:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"SVG Logic Error: {str(tee)}")
     except Exception as e:
         db.rollback()
         logger.error(f"Critical System Failure: {e}")

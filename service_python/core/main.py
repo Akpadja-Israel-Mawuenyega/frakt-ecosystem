@@ -1,4 +1,5 @@
 import uvicorn
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -9,17 +10,22 @@ from slowapi import _rate_limit_exceeded_handler
 from limiter_config import limiter
 from logging_config import logger
 from database import init_db
-from generator import executor
+from worker.generator import executor
 from routers.generation_router import router as generation_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Frakt API...")
+    
+    transport = httpx.AsyncHTTPTransport(uds="/tmp/frakt_worker.sock")
+    app.state.worker_client = httpx.AsyncClient(transport=transport, base_url="http://worker")
+    
     init_db()
     executor.submit(lambda: "warm")
     yield
+    
+    await app.state.worker_client.close()
     logger.info("Shutting down Frakt API...")
-    executor.shutdown(wait=True)
 
 
 app = FastAPI(
