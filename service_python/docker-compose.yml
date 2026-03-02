@@ -1,0 +1,20 @@
+services:
+  gateway:
+    build: 
+      context: ./core
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - frakt_sockets:/tmp/sockets
+    depends_on:
+      - worker
+
+  worker:
+    build: ./worker
+    volumes:
+      - frakt_sockets:/tmp/sockets
+
+volumes:
+  frakt_sockets:

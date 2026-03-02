@@ -16,6 +16,10 @@ class ExecutionRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+def warm_up():
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -25,7 +29,7 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing Sandbox Worker Subsystem...")
     try:
         # Submit a no-op task to 'spin up' the OS processes in the pool
-        future = executor.submit(lambda: True)
+        future = executor.submit(warm_up)
         future.result(timeout=5.0)
         logger.info("Sandbox ProcessPool is warm and synchronized.")
     except Exception as e:

@@ -10,21 +10,39 @@ from slowapi import _rate_limit_exceeded_handler
 from limiter_config import limiter
 from logging_config import logger
 from database import init_db
-from worker.generator import executor
 from routers.generation_router import router as generation_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Frakt API...")
-    
-    transport = httpx.AsyncHTTPTransport(uds="/tmp/frakt_worker.sock")
-    app.state.worker_client = httpx.AsyncClient(transport=transport, base_url="http://worker")
-    
+    """
+    Orchestrates the Gateway lifecycle and resource synchronization.
+
+    This manager performs the following critical start-up sequences:
+    1.  **UDS Initialization**: Configured a high-performance AsyncHTTPTransport
+        linked to the shared '/tmp/sockets/worker.sock' volume for low-latency
+        inter-container communication.
+    2.  **State Management**: Attaches a persistent AsyncClient to 'app.state'
+        to ensure connection pooling across all generation requests.
+    3.  **Persistence Layer**: Initializes the database engine (MySQL/XAMPP)
+        and verifies the connection to the multi-tenant schema[cite: 1].
+
+    On shutdown, it ensures all active file descriptors and UDS connections
+    are gracefully closed to prevent resource leakage.
+    """
+    logger.info("Starting Frakt API Gateway & Initializing UDS Transport...")
+
+    # Establish the private corridor to the Sandbox Worker
+    transport = httpx.AsyncHTTPTransport(uds="/tmp/sockets/worker.sock")
+    app.state.worker_client = httpx.AsyncClient(
+        transport=transport, base_url="http://worker-sandbox"
+    )
+
     init_db()
-    executor.submit(lambda: "warm")
     yield
-    
-    await app.state.worker_client.close()
+
+    # Graceful teardown of the UDS connection pool
+    await app.state.worker_client.aclose()
     logger.info("Shutting down Frakt API...")
 
 

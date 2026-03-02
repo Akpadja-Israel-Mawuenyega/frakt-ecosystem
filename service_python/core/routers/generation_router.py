@@ -1,9 +1,10 @@
 # generation_router.py
 
+import httpx
+from httpx import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import update
-from httpx import AsyncClient
 
 from limiter_config import limiter
 from logging_config import logger
@@ -139,6 +140,10 @@ async def generate_svg(
         raise
     except Exception as e:
         db.rollback()
+        if isinstance(e, httpx.TimeoutException):
+            logger.warning(f"Worker timeout for customer {customer.id}")
+            raise HTTPException(status_code=504, detail="Rendering timeout.")
+        
         logger.error(f"Critical generation failure: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
