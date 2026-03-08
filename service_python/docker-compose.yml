@@ -1,20 +1,45 @@
 services:
   gateway:
     build: 
-      context: ./core
-      dockerfile: Dockerfile
+      context: .          
+      dockerfile: Dockerfile.gateway
+    user: "1001:1001"     
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file: .env
     volumes:
       - frakt_sockets:/tmp/sockets
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    cap_drop:
+      - ALL              
     depends_on:
       - worker
 
   worker:
-    build: ./worker
+    build: 
+      context: ./worker  
+      dockerfile: Dockerfile.worker
+    user: "1002:1001"  
     volumes:
       - frakt_sockets:/tmp/sockets
+    deploy:
+      resources:
+        limits:
+          memory: 1G  
+          cpus: '2.0'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   frakt_sockets:
+    driver: local
+    driver_opts:
+      type: tmpfs      
+      device: tmpfs

@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+# 1. Match GID/UID with Gateway for socket access
+RUN groupadd -g 1001 fraktgroup && \
+    useradd -u 1002 -g fraktgroup -s /bin/false -m workeruser
+
+WORKDIR /worker_app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY --chown=workeruser:fraktgroup . .
+
+# 2. Prepare Socket dir
+RUN mkdir -p /tmp/sockets && \
+    chown -R workeruser:fraktgroup /tmp/sockets && \
+    chmod 770 /tmp/sockets
+
+USER workeruser
+
+# 3. Bind to UDS with strict umask (ensures group can read the socket)
+CMD ["uvicorn", "main:app", "--uds", "/tmp/sockets/worker.sock", "--umask", "007"]

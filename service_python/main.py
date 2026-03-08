@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from limiter_config import limiter
+from core.middleware.limiter_config import limiter
 from logging_config import logger
 from database import init_db
-from routers.generation_router import router as generation_router
+from core.middleware import register_error_handlers
+from routers import template_router, generation_router
 
 
 @asynccontextmanager
@@ -52,6 +53,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+register_error_handlers(app)
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -62,7 +65,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(generation_router)
+app.include_router(generation_router, prefix="/v1")
+app.include_router(template_router, prefix="/v1")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

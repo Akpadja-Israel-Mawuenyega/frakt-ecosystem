@@ -3,7 +3,7 @@ import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
-from models import Base
+from database.models import Base
 from dotenv import load_dotenv
 from logging_config import logger
 

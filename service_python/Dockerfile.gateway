@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+# 1. Create a system group and user
+RUN groupadd -g 1001 fraktgroup && \
+    useradd -u 1001 -g fraktgroup -s /bin/false -m fraktuser
+
+WORKDIR /app
+
+# 2. Install minimal dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 3. Copy app and set ownership
+COPY --chown=fraktuser:fraktgroup . .
+
+# 4. Prepare Socket & Log dirs
+RUN mkdir -p /tmp/sockets /app/logs && \
+    chown -R fraktuser:fraktgroup /tmp/sockets /app/logs && \
+    chmod 770 /tmp/sockets
+
+# 5. Switch to non-root user
+USER fraktuser
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

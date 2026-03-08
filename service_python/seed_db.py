@@ -4,8 +4,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.models import Customer, SVGTemplate
-from core.database import Base
+from database import Customer, SVGTemplate, Base
 
 DB_URL = "mysql+pymysql://root:john_wick95@localhost:3306/frakt_db"
 engine = create_engine(DB_URL)
