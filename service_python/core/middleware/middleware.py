@@ -1,10 +1,10 @@
-#core/middleware/middlewares.py
+#core/middleware/middleware.py
 
 import time
 from fastapi import Request, Depends, status, Header, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db, Customer
-from tier_config import TIER_LIMITS
+from service_python.routers.tier_config import TIER_LIMITS
 from logging_config import logger
 
 

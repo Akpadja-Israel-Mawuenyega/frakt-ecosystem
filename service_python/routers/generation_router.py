@@ -8,7 +8,7 @@ from sqlalchemy import update
 from core.middleware.limiter_config import limiter
 from logging_config import logger
 from core.middleware import get_current_customer, get_tier_limit
-from core.tier_config import TIER_LIMITS
+from service_python.routers.tier_config import TIER_LIMITS
 from database import get_db, Customer, SVGTemplate, SvgGenerationRequest
 from core.ai_engine import PredictiveEngine
 
@@ -19,6 +19,25 @@ router = APIRouter(
 
 
 def get_worker(request: Request) -> AsyncClient:
+    """
+    Dependency provider for the sandboxed Worker execution client.
+
+    Retrieves the persistent 'httpx.AsyncClient' from the application state.
+    This client is initialized during the 'lifespan' startup sequence to
+    utilize a High-Performance Unix Domain Socket (UDS) transport.
+
+    Using this dependency ensures that the application leverages connection
+    pooling rather than instantiating a new client per request, significantly
+    reducing the latency of inter-container communication.
+
+    Args:
+        request (Request): The incoming FastAPI request object containing
+                          the global 'app.state'.
+
+    Returns:
+        AsyncClient: The shared, non-blocking HTTP client configured
+                     for UDS transport.
+    """
     return request.app.state.worker_client
 
 
@@ -29,6 +48,7 @@ async def generate_svg(
     data: SvgGenerationRequest,
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
+    worker_client: AsyncClient = Depends(get_worker),
 ):
     """
     Standard SVG Generation endpoint with atomic usage metering.
@@ -76,7 +96,6 @@ async def generate_svg(
     if result.rowcount == 0:
         raise HTTPException(status_code=403, detail="Quota exceeded.")
 
-    worker_client = get_worker(request)
     payload = {
         "template_code": template.template_code,
         "params": data.params,
@@ -108,6 +127,7 @@ async def generate_predictive_svg(
     mode: str = "both",
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
+    worker_client: AsyncClient = Depends(get_worker),
 ):
     """
     Premium Generation Endpoint with Adaptive AI Inference.
@@ -165,7 +185,6 @@ async def generate_predictive_svg(
             status_code=403, detail="Quota exceeded during transaction."
         )
 
-    worker_client = get_worker(request)
     payload = {
         "template_code": template.template_code,
         "params": unified_params,

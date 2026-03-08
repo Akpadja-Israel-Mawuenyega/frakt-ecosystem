@@ -1,10 +1,18 @@
 # service_python/schemas.py
+
 from pydantic import BaseModel, Field
 from typing import Dict, Optional, Any
 
 
 class SvgGenerationRequest(BaseModel):
-    """Schema for rendering an SVG from an existing template."""
+    """
+    Data Transfer Object (DTO) for SVG Rendering.
+
+    This schema encapsulates the data required to trigger a sandboxed
+    execution. It separates dynamic parameters (data) from structural
+    overrides (metadata) to ensure a clean interface for client-side
+    dashboards and BI tools.
+    """
 
     template_name: str = Field(
         ...,
@@ -24,7 +32,13 @@ class SvgGenerationRequest(BaseModel):
 
 
 class TemplateCreate(BaseModel):
-    """Schema for creating a new SVG template."""
+    """
+    Schema for Template Ingestion and Registration.
+
+    Enforces strict validation on new SVG logic before it enters the
+    repository. This ensures that only well-formed Python code and
+    schema definitions are persisted, reducing runtime rendering errors.
+    """
 
     template_name: str = Field(
         ...,
@@ -45,7 +59,14 @@ class TemplateCreate(BaseModel):
 
 
 class TemplateUpdate(BaseModel):
-    """Schema for updating an existing template. All fields optional."""
+    """
+    Partial Update Payload for Template Refactoring.
+
+    Implements a PATCH-compatible schema where all fields are optional.
+    The model is designed to be dumped with 'exclude_unset=True' to
+    perform selective updates on the SQLAlchemy model without
+    overwriting existing logic with null values.
+    """
 
     template_name: Optional[str] = Field(None, min_length=1, max_length=100)
     template_code: Optional[str] = Field(None, min_length=1)
@@ -53,7 +74,14 @@ class TemplateUpdate(BaseModel):
 
 
 class TemplateResponse(BaseModel):
-    """Schema for returning template data. Includes DB-generated fields."""
+    """
+    Authenticated Template View Model.
+
+    Provides a sanitized view of the SVGTemplate database record.
+    By setting 'from_attributes = True', this schema allows the
+    FastAPI router to automatically serialize SQLAlchemy ORM objects
+    while enforcing the specific structure of the public API.
+    """
 
     id: int
     owner_id: int
@@ -62,4 +90,4 @@ class TemplateResponse(BaseModel):
     required_params: Dict[str, Any]
 
     class Config:
-        from_attributes = True  # Critical for SQLAlchemy compatibility
+        from_attributes = True

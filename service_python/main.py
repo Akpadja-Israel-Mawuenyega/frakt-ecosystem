@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     """
     logger.info("Starting Frakt API Gateway & Initializing UDS Transport...")
 
-    # Establish the private corridor to the Sandbox Worker
+    # Establish the private corridor (socket connection) to the Sandbox Worker
     transport = httpx.AsyncHTTPTransport(uds="/tmp/sockets/worker.sock")
     app.state.worker_client = httpx.AsyncClient(
         transport=transport, base_url="http://worker-sandbox"

@@ -23,9 +23,10 @@ from .schemas import (
     TemplateUpdate,
     TemplateResponse,
 )
-from .database import get_db
+from .database import  init_db, get_db
 
 __all__ = [
+    "init_db",
     "get_db",
     "Base",
     "Customer",
