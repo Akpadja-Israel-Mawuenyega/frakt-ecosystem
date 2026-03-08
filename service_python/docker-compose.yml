@@ -9,17 +9,9 @@ services:
     env_file: .env
     volumes:
       - frakt_sockets:/tmp/sockets
-      - ./logs:/app/logs
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
-    cap_drop:
-      - ALL              
+      - ./logs:/app/logs            
     depends_on:
       - worker
-
   worker:
     build: 
       context: ./worker  
@@ -27,16 +19,6 @@ services:
     user: "1002:1001"  
     volumes:
       - frakt_sockets:/tmp/sockets
-    deploy:
-      resources:
-        limits:
-          memory: 1G  
-          cpus: '2.0'
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-
 volumes:
   frakt_sockets:
     driver: local
