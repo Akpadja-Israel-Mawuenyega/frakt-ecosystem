@@ -30,7 +30,6 @@ coverage.xml
 *.bak
 
 # --- Docker & Temp ---
-.dockerignore
 *.log
 /tmp/sockets/
 

@@ -1,0 +1,9 @@
+# Ignore the worker code when building the gateway
+worker/
+
+# Ignore local junk
+__pycache__/
+*.pyc
+.git
+.env
+venv/
