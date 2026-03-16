@@ -1,0 +1,181 @@
+import re
+import math
+
+
+def extend_labels_for_forecast(user_labels: list, forecast_count: int) -> list:
+    """
+    Intelligently extends labels for stocks, dates, or generic steps.
+    """
+    if not user_labels or forecast_count <= 0:
+        return user_labels
+
+    extended = list(user_labels)
+    last_val = user_labels[-1]
+
+    # 1. Numeric/Stock Price Logic: (e.g., ["180", "190"] -> "200", "210")
+    try:
+        if len(user_labels) >= 2:
+            v2, v1 = float(user_labels[-1]), float(user_labels[-2])
+            step = v2 - v1
+            for i in range(1, forecast_count + 1):
+                new_val = v2 + (step * i)
+                # Format: remove .0 if it's an integer, else round to 2 decimals
+                label = str(int(new_val) if new_val.is_integer() else round(new_val, 2))
+                extended.append(label)
+            return extended
+    except (ValueError, TypeError):
+        pass
+
+    # 2. Calendar Logic: (e.g., ["Oct", "Nov", "Dec"] -> "Jan", "Feb")
+    months = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    ]
+    if str(last_val) in months:
+        idx = months.index(str(last_val))
+        for i in range(1, forecast_count + 1):
+            extended.append(months[(idx + i) % 12])
+        return extended
+
+    # 3. Fallback: (e.g., ["Batch A"] -> "Batch A+1")
+    for i in range(1, forecast_count + 1):
+        extended.append(f"{last_val}+{i}")
+
+    return extended
+
+
+def calculate_clean_scale(all_y_values: list):
+    """
+    Returns (y_min, y_range, steps) for a professional-looking axis.
+    """
+    if not all_y_values:
+        return 0, 100, [0, 25, 50, 75, 100]
+
+    y_min_raw, y_max_raw = min(all_y_values), max(all_y_values)
+    raw_range = y_max_raw - y_min_raw
+
+    # Target 4 markers
+    rough_step = raw_range / 3 if raw_range > 0 else 1
+    mag = 10 ** math.floor(math.log10(rough_step)) if rough_step > 0 else 1
+    norm = rough_step / mag
+    clean_step = mag * (1 if norm < 1.5 else 2 if norm < 3 else 5 if norm < 7 else 10)
+
+    start_val = math.floor(y_min_raw / clean_step) * clean_step
+    steps = [start_val + (i * clean_step) for i in range(4)]
+
+    y_min_calc = steps[0]
+    y_range_calc = (steps[-1] - steps[0]) or 1
+
+    return y_min_calc, y_range_calc, steps
+
+
+def map_to_pixel(val, y_min, y_range, height):
+    """
+    Maps a data value to an SVG Y-coordinate.
+    """
+    chart_floor = height - 40
+    chart_ceiling = 20
+    return chart_floor - ((val - y_min) / y_range * (chart_floor - chart_ceiling))
+
+
+def append_svg_assets(
+    svg_content: str, labels: list, raw_points: list, history_count: int = None
+) -> str:
+    """
+    Unified stamper using EXACT user-provided coordinates for data points.
+
+    Args:
+        svg_content: The raw SVG XML.
+        labels: List of strings for the X-axis.
+        raw_points: The original [[x, y], [x, y]] data from the request.
+        history_count: Index where forecast starts.
+    """
+    if not raw_points:
+        return svg_content
+
+    # 1. Parse ViewBox
+    vb_match = re.search(r'viewBox=["\']\d+\s+\d+\s+(\d+)\s+(\d+)["\']', svg_content)
+    width, height = (
+        (float(vb_match.group(1)), float(vb_match.group(2))) if vb_match else (800, 250)
+    )
+
+    # 2. Extract Values
+    y_vals = [p[1] if isinstance(p, list) else p for p in raw_points]
+
+    # Shared Scale Logic
+    y_min_calc, y_range_calc, steps = calculate_clean_scale(y_vals)
+
+    # --- PART A: Y-AXIS SCALE ---
+    y_axis_xml = '<g id="y-axis" font-family="sans-serif" font-size="10" fill="#AAA" text-anchor="start">'
+    for val in steps:
+        y_pos = map_to_pixel(val, y_min_calc, y_range_calc, height)
+        y_axis_xml += f'<text x="5" y="{y_pos + 4}">${int(val)}</text>'
+    y_axis_xml += "</g>"
+
+   # --- PART B: INTERACTIVE DATA POINTS ---
+    dots_xml = '<g id="interactive-points">'
+    margin_left = 50
+    draw_width = width - 70 
+    
+    # We need the total count of labels to calculate spacing correctly
+    num_labels = len(labels)
+    x_step = draw_width / (num_labels - 1) if num_labels > 1 else 0
+
+    for i, curr_y_val in enumerate(y_vals):
+        # CALCULATE X: Use the exact same math as the X-axis labels
+        curr_x = margin_left + (i * x_step)
+        
+        # Map Y value using the shared pixel mapper
+        y_pos = map_to_pixel(curr_y_val, y_min_calc, y_range_calc, height)
+
+        # Determine color (history vs forecast)
+        is_forecast = history_count is not None and i >= history_count
+        fill_color = "#2ecc71" if not is_forecast else "#94dfb1"
+
+        label_text = labels[i] if i < len(labels) else f"Point {i+1}"
+
+        # THE FIX: Ensure cx="{curr_x}" is explicitly written
+        dots_xml += f"""
+        <circle cx="{curr_x}" cy="{y_pos}" r="5" fill="{fill_color}" stroke="white" stroke-width="2">
+            <title>{label_text}: ${curr_y_val}</title>
+        </circle>"""
+    dots_xml += "</g>"
+
+    # --- PART C: X-AXIS LABELS ---
+    x_labels_xml = '<g id="x-labels" font-family="sans-serif" font-size="11" fill="#888" text-anchor="middle">'
+    margin_left = 50
+    draw_width = width - 70
+    for i, text in enumerate(labels):
+        x_pos = (
+            margin_left + (i * (draw_width / (len(labels) - 1)))
+            if len(labels) > 1
+            else margin_left
+        )
+        x_labels_xml += f'<text x="{x_pos}" y="{height - 10}">{text}</text>'
+    x_labels_xml += "</g>"
+
+    # --- PART D: FORECAST BOUNDARY (Restored) ---
+    boundary_xml = ""
+    if history_count is not None and history_count < len(labels):
+        # Calculate X based on the same logic used for dots/labels
+        split_x = margin_left + ((history_count - 1) * (draw_width / (len(labels) - 1)))
+        boundary_xml = f"""
+        <g id="forecast-boundary">
+            <line x1="{split_x}" y1="10" x2="{split_x}" y2="{height - 35}" stroke="#ccc" stroke-width="1" stroke-dasharray="4" />
+            <text x="{split_x + 5}" y="25" font-size="10" fill="#aaa">Forecast</text>
+        </g>
+        """
+
+    # Final Injection
+    combined = f"{y_axis_xml}{x_labels_xml}{boundary_xml}{dots_xml}"
+    return svg_content.replace("</svg>", f"{combined}</svg>")

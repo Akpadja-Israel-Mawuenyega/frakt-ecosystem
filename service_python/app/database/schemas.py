@@ -1,7 +1,7 @@
 # service_python/schemas.py
 
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, Any
+from typing import List, Dict, Optional, Any
 
 
 class SvgGenerationRequest(BaseModel):
@@ -23,6 +23,11 @@ class SvgGenerationRequest(BaseModel):
         ...,
         description="Dynamic data to be injected into the template.",
         example={"current_month": 4500, "previous_month": 3200},
+    )
+    labels: Optional[List[str]] = Field(
+        default=None,
+        description="Optional labeling for data points.",
+        example=["Jan", "Feb", "Mar"],
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,

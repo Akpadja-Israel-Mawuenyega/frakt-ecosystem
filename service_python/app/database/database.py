@@ -3,15 +3,29 @@ import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
-from database.models import Base
+from .models import Base
 from dotenv import load_dotenv
-from logging_config import logger
+from app.configs.logging_config import logger
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+LOCAL_DB_URL = os.environ.get("LOCAL_DATABASE_URL")
+DOCKER_DB_URL = os.environ.get("DOCKER_DATABASE_URL")
+
+# 2. Logic: If we are in Docker, 'DOCKER_ENVIRONMENT' will be True
+# (We set this in the docker-compose.yml file)
+IS_DOCKER = os.environ.get("DOCKER_ENVIRONMENT", "false").lower() == "true"
+
+if IS_DOCKER:
+    DATABASE_URL = DOCKER_DB_URL
+    logger.info("Sovereign Gateway: Running in DOCKER mode.")
+else:
+    DATABASE_URL = LOCAL_DB_URL
+    logger.info("Sovereign Gateway: Running in NATIVE mode.")
+
+# 3. Failsafe
 if not DATABASE_URL:
-    logger.critical("DATABASE_URL environment variable is not set.")
+    logger.critical("DATABASE_URL is missing for the current environment!")
     sys.exit(1)
 
 engine = create_engine(

@@ -4,17 +4,12 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 
-from core.middleware.limiter_config import limiter
-from logging_config import logger
-from core.middleware import get_current_customer, get_tier_limit
-from database import (
-    get_db,
-    Customer,
-    SVGTemplate,
-    TemplateCreate,
-    TemplateUpdate,
-    TemplateResponse,
-)
+from app.configs.limiter_config import limiter
+from app.configs.logging_config import logger
+from app.middleware.middleware import get_current_customer, get_tier_limit
+from app.database.database import get_db
+from app.database.models import Customer, SVGTemplate
+from app.database.schemas import TemplateCreate, TemplateUpdate, TemplateResponse
 
 router = APIRouter(
     prefix="/templates",

@@ -1,10 +1,10 @@
-# core/middleware/error_handlers.py
+# app/middleware/error_handlers.py
 
 import httpx
 from fastapi import Request, FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from service_python.logging_config import logger
+from app.configs.logging_config import logger
 
 
 def register_error_handlers(app: FastAPI):

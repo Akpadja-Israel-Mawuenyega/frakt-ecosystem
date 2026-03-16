@@ -17,13 +17,17 @@ class ExecutionRequest(BaseModel):
 
 
 def warm_up():
+    """
+    Simple process called by the lifespan manager to warm up the system. \n
+    Returns **True**.
+    """
     return True
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Manages the worker lifecycle.
+    Manages the worker lifecycle. \n
     Warms the ProcessPool on startup to ensure the first request is fast.
     """
     logger.info("Initializing Sandbox Worker Subsystem...")
@@ -64,3 +68,18 @@ def execute(req: ExecutionRequest):
         raise HTTPException(
             status_code=500, detail=f"Sandbox Critical Failure: {str(e)}"
         )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # ... (your path setup code) ...
+    from app.configs.socket_setup import get_socket_path
+
+    # Now get_socket_path returns "127.0.0.1:8008"
+    addr = get_socket_path()
+    host, port = addr.split(":")
+
+    print(f"🚀 Sovereign Worker Muscle igniting on TCP: {addr}")
+
+    uvicorn.run("worker.worker:app", host=host, port=int(port), factory=False)

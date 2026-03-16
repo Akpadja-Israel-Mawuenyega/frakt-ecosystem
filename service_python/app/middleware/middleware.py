@@ -1,11 +1,12 @@
-#core/middleware/middleware.py
+# app/middleware/middleware.py
 
 import time
 from fastapi import Request, Depends, status, Header, HTTPException
 from sqlalchemy.orm import Session
-from database import get_db, Customer
-from service_python.routers.tier_config import TIER_LIMITS
-from logging_config import logger
+from app.database.database import get_db
+from app.database.models import Customer
+from app.configs.logging_config import logger
+from app.configs.tier_config import TIER_LIMITS
 
 
 from slowapi.util import get_remote_address
@@ -28,7 +29,7 @@ def get_cached_tier(api_key: str) -> str:
         tier, ts = _tier_cache[api_key]
         if now - ts < CACHE_TTL:
             return tier
-    from database import SessionLocal
+    from app.database.database import SessionLocal
 
     with SessionLocal() as db:
         customer = db.query(Customer).filter(Customer.api_key == api_key).first()
@@ -37,7 +38,7 @@ def get_cached_tier(api_key: str) -> str:
     return tier
 
 
-def get_tier_limit(request: Request) -> str:
+def get_tier_limit(request: Request = None) -> str:
     """
     Dynamic rate-limit selector for SlowAPI.
 
@@ -45,7 +46,11 @@ def get_tier_limit(request: Request) -> str:
     and returns the corresponding rate limit string (e.g., "5/minute").
     """
 
+    if request is None:
+        return TIER_LIMITS["free"]["rate"]
+    
     api_key = request.headers.get("x-api-key")
+    
     if not api_key:
         return TIER_LIMITS["free"]["rate"]
 

@@ -1,7 +1,7 @@
 services:
   gateway:
     build: 
-      context: .          
+      context: ./app          
       dockerfile: Dockerfile.gateway
     user: "1001:1001"     
     ports:

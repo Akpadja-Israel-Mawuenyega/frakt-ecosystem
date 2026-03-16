@@ -1,4 +1,4 @@
-# database/__init__.py
+# app/database/__init__.py
 
 """
 Frakt Data Access Layer (DAL).
@@ -15,24 +15,3 @@ reducing circular dependencies between the API routers and the core AI engine.
 Usage:
     from database import get_db, Customer, SVGTemplate
 """
-
-from .models import Customer, SVGTemplate, Base
-from .schemas import (
-    SvgGenerationRequest,
-    TemplateCreate,
-    TemplateUpdate,
-    TemplateResponse,
-)
-from .database import  init_db, get_db
-
-__all__ = [
-    "init_db",
-    "get_db",
-    "Base",
-    "Customer",
-    "SVGTemplate",
-    "SvgGenerationRequest",
-    "TemplateCreate",
-    "TemplateUpdate",
-    "TemplateResponse",
-]

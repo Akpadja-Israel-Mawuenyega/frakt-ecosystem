@@ -5,12 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import update
 
-from core.middleware.limiter_config import limiter
-from logging_config import logger
-from core.middleware import get_current_customer, get_tier_limit
-from service_python.routers.tier_config import TIER_LIMITS
-from database import get_db, Customer, SVGTemplate, SvgGenerationRequest
-from core.ai_engine import PredictiveEngine
+from app.configs.limiter_config import limiter
+from app.configs.logging_config import logger
+from app.configs.tier_config import TIER_LIMITS
+from app.middleware.middleware import get_current_customer, get_tier_limit
+from app.database.database import get_db
+from app.database.models import Customer, SVGTemplate
+from app.database.schemas import SvgGenerationRequest
+from app.ai.ai_engine import PredictiveEngine
+from app.routers.utils import (
+    append_svg_assets,
+    extend_labels_for_forecast,
+    calculate_clean_scale,
+    map_to_pixel,
+)
 
 router = APIRouter(
     tags=["SVG Template Generation"],
@@ -36,7 +44,7 @@ def get_worker(request: Request) -> AsyncClient:
 
     Returns:
         AsyncClient: The shared, non-blocking HTTP client configured
-                     for UDS transport.
+                      for UDS transport.
     """
     return request.app.state.worker_client
 
@@ -86,6 +94,27 @@ async def generate_svg(
     if template.owner_id is not None and template.owner_id != customer.id:
         raise HTTPException(status_code=403, detail="Private template access denied.")
 
+    raw_points = data.params.get("points", [])
+    history_count = len(raw_points)
+    user_labels = data.labels or []
+
+    # Logic: Scale raw data points to pixel coordinates for the template line
+    all_y_data = [p[1] if isinstance(p, list) else p for p in raw_points]
+    y_min, y_range, _ = calculate_clean_scale(all_y_data)
+
+    # Calculate standard X-spacing (800px width, 50px left margin, 20px right margin)
+    margin_left = 50
+    draw_width = 800 - 70
+    x_step = draw_width / (history_count - 1) if history_count > 1 else 0
+
+    render_points = [
+        [margin_left + (i * x_step), map_to_pixel(all_y_data[i], y_min, y_range, 250)]
+        for i in range(history_count)
+    ]
+
+    data.params["points"] = render_points
+    final_labels = extend_labels_for_forecast(user_labels, 0)
+
     result = db.execute(
         update(Customer)
         .where(Customer.id == customer.id)
@@ -106,6 +135,12 @@ async def generate_svg(
     response.raise_for_status()
 
     svg_content = response.json()["output"]
+
+    if data.labels:
+        # Pass original data for asset stamping to maintain scale consistency
+        svg_content = append_svg_assets(
+            svg_content, final_labels, all_y_data, history_count
+        )
 
     db.commit()
     logger.info(
@@ -138,6 +173,20 @@ async def generate_predictive_svg(
     3.  **Validation-First Inference**: Runs PredictiveEngine BEFORE charging the user.
     4.  **Atomic Metering**: Increments usage count (2 credits) via Optimistic Concurrency.
     5.  **Isolated Rendering**: Dispatches data + AI results to the sandboxed ProcessPool.
+    
+    Returns:
+        Response: A raw 'image/svg+xml' stream containing the primary chart 
+                  line, the dashed AI forecast, and injected axis metadata 
+                  (labels, dots, and scale).
+
+    Raises:
+        HTTPException: 
+            - 400: Prediction Engine failure (e.g., insufficient data points 
+                   for the requested AI method).
+            - 403: Quota exceeded or attempted access to a private template 
+                   owned by another customer.
+            - 404: The specified 'template_name' does not exist in the database.
+            - 500: Sandbox execution timeout or critical worker subsystem failure.
     """
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
 
@@ -158,6 +207,7 @@ async def generate_predictive_svg(
         )
 
     raw_points = data.params.get("points", [])
+    history_count = len(raw_points)
     requested_method = (data.metadata or {}).get("ai_method", "auto")
 
     ai_results = None
@@ -166,10 +216,48 @@ async def generate_predictive_svg(
         if "error" in ai_results:
             raise HTTPException(status_code=400, detail=ai_results["error"])
 
+    # Extract raw data for scaling
+    forecast_y_raw = ai_results.get("forecast_y", []) if ai_results else []
+    forecast_count = len(forecast_y_raw)
+    history_y_raw = [p[1] if isinstance(p, list) else p for p in raw_points]
+
+    # Shared Scaling Logic: History + Forecast
+    all_y_data_raw = history_y_raw + forecast_y_raw
+    y_min, y_range, _ = calculate_clean_scale(all_y_data_raw)
+
+    # Standardized X calculation (Must match append_svg_assets exactly)
+    margin_left = 50
+    draw_width = 800 - 70
+    total_len = history_count + forecast_count
+    x_step = draw_width / (total_len - 1) if total_len > 1 else 0
+
+    # Map coordinates to pixels
+    render_points = [
+        [
+            margin_left + (i * x_step),
+            map_to_pixel(history_y_raw[i], y_min, y_range, 250),
+        ]
+        for i in range(history_count)
+    ]
+
+    render_forecast_y = [map_to_pixel(y, y_min, y_range, 250) for y in forecast_y_raw]
+    render_forecast_x = [
+        margin_left + ((i + history_count) * x_step) for i in range(forecast_count)
+    ]
+
+    user_labels = data.labels or []
+    final_labels = extend_labels_for_forecast(user_labels, forecast_count)
+
+    # Ensure the template has a consistent way to see history and forecast
     unified_params = {
-        "base_data": raw_points,
+        "points": render_points,  # We pass the scaled pixels for the line
+        "forecast_x": render_forecast_x,
+        "forecast_y": render_forecast_y,  # Pre-scaled forecast pixels
+        "labels": final_labels,
+        "method": ai_results.get("method") if ai_results else "None",
+        "confidence": ai_results.get("confidence") if ai_results else 0,
         "mode": mode,
-        "ai_results": ai_results,
+        "stroke_color": data.params.get("stroke_color", "#2ecc71"),
     }
 
     credits_to_deduct = 2 if mode in ["predictive", "both"] else 1
@@ -195,18 +283,25 @@ async def generate_predictive_svg(
     response.raise_for_status()
 
     svg_content = response.json()["output"]
-    db.commit()
 
-    model_used = ai_results.get("method", requested_method) if ai_results else "none"
-    logger.info(
-        f"Generated Predictive SVG: Model={model_used} Credits={credits_to_deduct} CustomerID={customer.id}"
-    )
+    # AUTO-APPEND Logic
+    # This stamps the labels onto the SVG XML before returning it
+    if final_labels:
+        # Re-pass the raw Y data so append_svg_assets calculates the same Y-scale
+        svg_content = append_svg_assets(
+            svg_content, final_labels, all_y_data_raw, history_count
+        )
+
+    db.commit()
+    logger.info(f"Generated Predictive SVG: CustomerID={customer.id}")
 
     return Response(
         content=svg_content,
         media_type="image/svg+xml",
         headers={
             "X-Usage-Charged": str(credits_to_deduct),
-            "X-AI-Model": model_used,
+            "X-AI-Model": (
+                ai_results.get("method", requested_method) if ai_results else "none"
+            ),
         },
     )
