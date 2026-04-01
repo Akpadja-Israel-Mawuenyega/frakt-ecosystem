@@ -56,25 +56,20 @@ def extend_labels_for_forecast(user_labels: list, forecast_count: int) -> list:
 
 def calculate_clean_scale(all_y_values: list):
     """
-    Returns (y_min, y_range, steps) for a professional-looking axis.
+    Returns a fixed coordinate system.
+    Ideal for comparing multiple charts side-by-side.
     """
-    if not all_y_values:
-        return 0, 100, [0, 25, 50, 75, 100]
+    # 1. HARDCODED BOUNDARIES: Define your "Graph Sheet"
+    # These could be pulled from a user-specific config in your DB
+    y_min_calc = 0
+    y_max_calc = 300  # Or whatever your "ceiling" is
 
-    y_min_raw, y_max_raw = min(all_y_values), max(all_y_values)
-    raw_range = y_max_raw - y_min_raw
+    # 2. FIXED STEPS: Always 100, 200, 300 etc.
+    # No more $83.33 or $153 labels.
+    clean_step = (y_max_calc - y_min_calc) / 3
+    steps = [y_min_calc + (i * clean_step) for i in range(4)]
 
-    # Target 4 markers
-    rough_step = raw_range / 3 if raw_range > 0 else 1
-    mag = 10 ** math.floor(math.log10(rough_step)) if rough_step > 0 else 1
-    norm = rough_step / mag
-    clean_step = mag * (1 if norm < 1.5 else 2 if norm < 3 else 5 if norm < 7 else 10)
-
-    start_val = math.floor(y_min_raw / clean_step) * clean_step
-    steps = [start_val + (i * clean_step) for i in range(4)]
-
-    y_min_calc = steps[0]
-    y_range_calc = (steps[-1] - steps[0]) or 1
+    y_range_calc = y_max_calc - y_min_calc
 
     return y_min_calc, y_range_calc, steps
 
@@ -83,9 +78,14 @@ def map_to_pixel(val, y_min, y_range, height):
     """
     Maps a data value to an SVG Y-coordinate.
     """
-    chart_floor = height - 40
-    chart_ceiling = 20
-    return chart_floor - ((val - y_min) / y_range * (chart_floor - chart_ceiling))
+    padding = 20  # Keep points 20px away from the top/bottom edges
+    usable_height = height - (padding * 2)
+
+    # Normalized position (0.0 to 1.0)
+    relative_pos = (val - y_min) / y_range
+
+    # Map to the "Safe Zone" (20px to 230px if height is 250)
+    return height - (padding + (relative_pos * usable_height))
 
 
 def append_svg_assets(

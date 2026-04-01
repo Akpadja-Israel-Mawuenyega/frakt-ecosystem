@@ -35,6 +35,7 @@ ALLOWED_FUNCS = {
     "sum": sum,
     "round": round,
     "enumerate": enumerate,
+    "zip": zip
 }
 
 # Persistent process pool to avoid the overhead of spawning new OS processes per request.

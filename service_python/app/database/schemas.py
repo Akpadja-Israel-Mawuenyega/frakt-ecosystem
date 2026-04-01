@@ -1,7 +1,7 @@
 # service_python/schemas.py
 
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Literal, Optional, Any
 
 
 class SvgGenerationRequest(BaseModel):
@@ -28,6 +28,10 @@ class SvgGenerationRequest(BaseModel):
         default=None,
         description="Optional labeling for data points.",
         example=["Jan", "Feb", "Mar"],
+    )
+    ai_method: Literal["none", "auto", "linear", "polynomial", "seasonal"] = Field(
+        default="none",
+        description="The AI method to use for forecasting. 'auto' lets the system choose the best method based on data patterns.",
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,

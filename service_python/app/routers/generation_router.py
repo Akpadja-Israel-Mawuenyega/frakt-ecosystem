@@ -159,7 +159,6 @@ async def generate_svg(
 async def generate_predictive_svg(
     request: Request,
     data: SvgGenerationRequest,
-    mode: str = "both",
     customer: Customer = Depends(get_current_customer),
     db: Session = Depends(get_db),
     worker_client: AsyncClient = Depends(get_worker),
@@ -208,13 +207,15 @@ async def generate_predictive_svg(
 
     raw_points = data.params.get("points", [])
     history_count = len(raw_points)
-    requested_method = (data.metadata or {}).get("ai_method", "auto")
+    
+    # AI Method handling: Default to auto if not provided or set to none
+    requested_method = data.ai_method if data.ai_method != "none" else "auto"
 
     ai_results = None
-    if mode in ["predictive", "both"]:
-        ai_results = PredictiveEngine.get_trend(raw_points, method=requested_method)
-        if "error" in ai_results:
-            raise HTTPException(status_code=400, detail=ai_results["error"])
+    # Predictive logic is always executed for this endpoint
+    ai_results = PredictiveEngine.get_trend(raw_points, method=requested_method)
+    if "error" in ai_results:
+        raise HTTPException(status_code=400, detail=ai_results["error"])
 
     # Extract raw data for scaling
     forecast_y_raw = ai_results.get("forecast_y", []) if ai_results else []
@@ -251,16 +252,16 @@ async def generate_predictive_svg(
     # Ensure the template has a consistent way to see history and forecast
     unified_params = {
         "points": render_points,  # We pass the scaled pixels for the line
-        "forecast_x": render_forecast_x,
-        "forecast_y": render_forecast_y,  # Pre-scaled forecast pixels
+        "forecast_x": render_forecast_x,  # Pre-scaled forecast pixels for X-values
+        "forecast_y": render_forecast_y,  # Pre-scaled forecast pixels for Y-values
         "labels": final_labels,
         "method": ai_results.get("method") if ai_results else "None",
         "confidence": ai_results.get("confidence") if ai_results else 0,
-        "mode": mode,
         "stroke_color": data.params.get("stroke_color", "#2ecc71"),
     }
 
-    credits_to_deduct = 2 if mode in ["predictive", "both"] else 1
+    # Premium endpoint fixed charge
+    credits_to_deduct = 2
     result = db.execute(
         update(Customer)
         .where(Customer.id == customer.id)
