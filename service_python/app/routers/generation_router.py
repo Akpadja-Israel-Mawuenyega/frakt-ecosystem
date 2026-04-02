@@ -1,4 +1,26 @@
-# generation_router.py
+# service_python/app/routers/generation_router.py
+"""
+Frakt SVG Generation & Inference Router.
+
+This is the primary engine room of the Frakt service. It orchestrates
+the high-level workflow of transforming raw JSON data into stamped,
+AI-enhanced SVG assets.
+
+Architectural Workflow:
+1.  Identity Resolution: Validates the tenant via the 'x-api-key' middleware.
+2.  Template Retrieval: Fetches the sandboxed Python logic from the DB.
+3.  Predictive Inference: If requested, routes data through the AI Engine
+    to generate future-trend coordinates.
+4.  Sandboxed Execution: Dispatches the template code and params to the
+    isolated UDS (User Defined Service) worker.
+5.  Post-Processing: Stamps Y-axis scales, X-axis labels, and interactive
+    elements onto the raw SVG return.
+6.  Usage Metering: Incrementally updates the tenant's usage count.
+
+Security Note:
+This router enforces strict multi-tenant boundaries; a customer can only
+invoke templates they explicitly own.
+"""
 
 from httpx import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
@@ -8,53 +30,39 @@ from sqlalchemy import update
 from app.configs.limiter_config import limiter
 from app.configs.logging_config import logger
 from app.configs.tier_config import TIER_LIMITS
-from app.middleware.middleware import get_current_customer, get_tier_limit
+from app.audit import log_event, LogSeverity
+from app.middleware.middleware import get_current_active_customer, get_tier_limit
 from app.database.database import get_db
 from app.database.models import Customer, SVGTemplate
 from app.database.schemas import SvgGenerationRequest
 from app.ai.ai_engine import PredictiveEngine
 from app.routers.utils import (
+    get_worker,
     append_svg_assets,
     extend_labels_for_forecast,
     calculate_clean_scale,
     map_to_pixel,
 )
 
+
+# =============================================================================
+# SECTION 1: ROUTER INITIALIZATION
+# =============================================================================
 router = APIRouter(
     tags=["SVG Template Generation"],
     responses={404: {"description": "Not found"}},
 )
 
 
-def get_worker(request: Request) -> AsyncClient:
-    """
-    Dependency provider for the sandboxed Worker execution client.
-
-    Retrieves the persistent 'httpx.AsyncClient' from the application state.
-    This client is initialized during the 'lifespan' startup sequence to
-    utilize a High-Performance Unix Domain Socket (UDS) transport.
-
-    Using this dependency ensures that the application leverages connection
-    pooling rather than instantiating a new client per request, significantly
-    reducing the latency of inter-container communication.
-
-    Args:
-        request (Request): The incoming FastAPI request object containing
-                          the global 'app.state'.
-
-    Returns:
-        AsyncClient: The shared, non-blocking HTTP client configured
-                      for UDS transport.
-    """
-    return request.app.state.worker_client
-
-
+# =============================================================================
+# SECTION 2: PURE SVG GENERATION ENDPOINT
+# =============================================================================
 @router.post("/generate", status_code=status.HTTP_200_OK)
 @limiter.limit(get_tier_limit)
 async def generate_svg(
     request: Request,
     data: SvgGenerationRequest,
-    customer: Customer = Depends(get_current_customer),
+    customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
     worker_client: AsyncClient = Depends(get_worker),
 ):
@@ -131,10 +139,28 @@ async def generate_svg(
         "metadata": data.metadata,
     }
 
-    response = await worker_client.post("/execute", json=payload, timeout=2.1)
-    response.raise_for_status()
+    try:
+        response = await worker_client.post("/execute", json=payload, timeout=2.1)
+        response.raise_for_status()
 
-    svg_content = response.json()["output"]
+        # Success path
+        svg_content = response.json()["output"]
+
+    except Exception as e:
+        # 1. Log the CRITICAL event before the API crashes
+        log_event(
+            db=db,
+            customer_id=customer.id if customer else "ANONYMOUS",
+            action="SANDBOX_EXECUTION_CRASH",
+            request=request,
+            endpoint=request.url.path,
+            status_code=500,
+            severity=LogSeverity.CRITICAL,
+        )
+        db.commit()  # Ensure the log is saved before crashing
+        # 2. Re-raise the exception to trigger global error handlers and return a 500 response
+        logger.error(f"Worker Failure: {str(e)}")
+        raise e
 
     if data.labels:
         # Pass original data for asset stamping to maintain scale consistency
@@ -142,6 +168,15 @@ async def generate_svg(
             svg_content, final_labels, all_y_data, history_count
         )
 
+    log_event(
+        db=db,
+        customer_id=customer.id,
+        action="SVG_RENDER_SUCCESS",
+        request=request,
+        endpoint="/v1/generate",
+        status_code=200,
+        severity=LogSeverity.INFO,
+    )
     db.commit()
     logger.info(
         f"Generated SVG: Template='{data.template_name}' CustomerID={customer.id}"
@@ -154,12 +189,15 @@ async def generate_svg(
     )
 
 
+# =============================================================================
+# SECTION 3: PREDICTIVE GENERATION ENDPOINT (PREMIUM)
+# =============================================================================
 @router.post("/generate-predictive", status_code=status.HTTP_200_OK)
 @limiter.limit(get_tier_limit)
 async def generate_predictive_svg(
     request: Request,
     data: SvgGenerationRequest,
-    customer: Customer = Depends(get_current_customer),
+    customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
     worker_client: AsyncClient = Depends(get_worker),
 ):
@@ -172,17 +210,17 @@ async def generate_predictive_svg(
     3.  **Validation-First Inference**: Runs PredictiveEngine BEFORE charging the user.
     4.  **Atomic Metering**: Increments usage count (2 credits) via Optimistic Concurrency.
     5.  **Isolated Rendering**: Dispatches data + AI results to the sandboxed ProcessPool.
-    
+
     Returns:
-        Response: A raw 'image/svg+xml' stream containing the primary chart 
-                  line, the dashed AI forecast, and injected axis metadata 
+        Response: A raw 'image/svg+xml' stream containing the primary chart
+                  line, the dashed AI forecast, and injected axis metadata
                   (labels, dots, and scale).
 
     Raises:
-        HTTPException: 
-            - 400: Prediction Engine failure (e.g., insufficient data points 
+        HTTPException:
+            - 400: Prediction Engine failure (e.g., insufficient data points
                    for the requested AI method).
-            - 403: Quota exceeded or attempted access to a private template 
+            - 403: Quota exceeded or attempted access to a private template
                    owned by another customer.
             - 404: The specified 'template_name' does not exist in the database.
             - 500: Sandbox execution timeout or critical worker subsystem failure.
@@ -207,7 +245,7 @@ async def generate_predictive_svg(
 
     raw_points = data.params.get("points", [])
     history_count = len(raw_points)
-    
+
     # AI Method handling: Default to auto if not provided or set to none
     requested_method = data.ai_method if data.ai_method != "none" else "auto"
 
@@ -280,10 +318,28 @@ async def generate_predictive_svg(
         "metadata": data.metadata,
     }
 
-    response = await worker_client.post("/execute", json=payload, timeout=2.1)
-    response.raise_for_status()
+    try:
+        response = await worker_client.post("/execute", json=payload, timeout=2.1)
+        response.raise_for_status()
 
-    svg_content = response.json()["output"]
+        # Success path
+        svg_content = response.json()["output"]
+
+    except Exception as e:
+        # 1. Log the CRITICAL event before the API crashes
+        log_event(
+            db=db,
+            customer_id=customer.id if customer else "ANONYMOUS",
+            action="SANDBOX_EXECUTION_CRASH",
+            request=request,
+            endpoint=request.url.path,
+            status_code=500,
+            severity=LogSeverity.CRITICAL,
+        )
+        db.commit()  # Ensure the log is saved before crashing
+        # 2. Re-raise the exception to trigger global error handlers and return a 500 response
+        logger.error(f"Worker Failure: {str(e)}")
+        raise e
 
     # AUTO-APPEND Logic
     # This stamps the labels onto the SVG XML before returning it
@@ -293,7 +349,16 @@ async def generate_predictive_svg(
             svg_content, final_labels, all_y_data_raw, history_count
         )
 
-    db.commit()
+    log_event(
+        db=db,
+        customer_id=customer.id,
+        action=f"AI_PREDICTION_{requested_method.upper()}",
+        request=request,
+        endpoint="/v1/generate-predictive",
+        status_code=200,
+        severity=LogSeverity.INFO,
+    )
+    db.commit() 
     logger.info(f"Generated Predictive SVG: CustomerID={customer.id}")
 
     return Response(

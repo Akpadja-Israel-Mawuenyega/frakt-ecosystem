@@ -1,3 +1,5 @@
+# service_python/worker/__init__.py
+
 """
 Frakt Sandbox Worker Package.
 

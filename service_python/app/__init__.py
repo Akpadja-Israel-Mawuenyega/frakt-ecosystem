@@ -1,3 +1,5 @@
+# service_python/app/__init__.py
+
 """
 Frakt API: The Sovereign Gateway.
 

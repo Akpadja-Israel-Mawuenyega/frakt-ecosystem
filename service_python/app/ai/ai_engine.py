@@ -1,3 +1,22 @@
+# service_python/app/ai/ai_engine.py
+"""
+Frakt Predictive Intelligence Engine.
+
+A high-performance supervised learning suite for time-series forecasting.
+The engine utilizes a variety of Scikit-Learn models to analyze historical
+data trends and generate future projections.
+
+Key Architectural Pillars:
+1.  Dynamic Routing: Automatically selects between Ridge, Polynomial,
+    and Bayesian models based on data volume and variance.
+2.  Weighted Learning: Applies exponential decay to prioritize recent
+    data points, ensuring the model adapts quickly to new trends.
+3.  Heuristic Guardrails: Enforces physical and logical limits on
+    predictions to maintain realism in the generated SVG outputs.
+4.  Multi-Format Support: Seamlessly handles sequential arrays and
+    [x, y] coordinate pairs.
+"""
+
 import numpy as np
 from sklearn.linear_model import Ridge, BayesianRidge
 from sklearn.preprocessing import PolynomialFeatures
@@ -44,7 +63,7 @@ class PredictiveEngine:
     def _generate_future_x(x: np.ndarray, steps: int) -> np.ndarray:
         """
         Calculates future X coordinates based on the existing X-axis cadence.
-        
+
         Ensures that predictions follow the same spacing as the input data,
         whether that is sequential indices or custom coordinate values.
         """
@@ -56,11 +75,9 @@ class PredictiveEngine:
             delta = 1.0
 
         future = np.arange(
-            last_x + delta,
-            last_x + delta + (steps * delta),
-            delta
+            last_x + delta, last_x + delta + (steps * delta), delta
         ).reshape(-1, 1)
-        
+
         return future[:steps]
 
     @staticmethod
@@ -70,7 +87,7 @@ class PredictiveEngine:
 
         Performs rigorous input validation, handles numeric conversion,
         calculates recency weights, and routes the request to the
-        appropriate fit method. Supports both sequential lists and 
+        appropriate fit method. Supports both sequential lists and
         coordinate pairs.
         """
         try:
@@ -90,13 +107,17 @@ class PredictiveEngine:
                     return {"error": "Invalid coordinate data structure"}
             else:
                 # Support for sequential [y1, y2, y3] data
-                if not all(isinstance(val, (int, float)) and np.isfinite(val) for val in data):
+                if not all(
+                    isinstance(val, (int, float)) and np.isfinite(val) for val in data
+                ):
                     return {"error": "Data contains invalid numeric values"}
                 y = np.array(data, dtype=float)
                 x = np.arange(len(y)).reshape(-1, 1)
 
             # Validate dataset size constraints
-            if not (constants.MIN_REQUIRED_POINTS <= len(y) <= constants.MAX_ALLOWED_POINTS):
+            if not (
+                constants.MIN_REQUIRED_POINTS <= len(y) <= constants.MAX_ALLOWED_POINTS
+            ):
                 return {
                     "error": f"Data must contain between "
                     f"{constants.MIN_REQUIRED_POINTS} and "

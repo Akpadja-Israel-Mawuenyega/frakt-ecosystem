@@ -1,3 +1,10 @@
+# service_python/app/database/database.py
+"""
+Database Connection & Session Management.
+
+This module establishes the connection to the MySQL database using SQLAlchemy.
+"""
+
 import os
 import sys
 from sqlalchemy import create_engine

@@ -1,4 +1,4 @@
-# app/routers/__init__.py
+# service_python/app/routers/__init__.py
 
 """
 Main routing package for the Frakt service.

@@ -1,3 +1,15 @@
+# service_python/app/configs/socket_setup.py
+"""
+Frakt Inter-Process Communication (IPC) Resolver.
+
+This utility manages the discovery and negotiation of communication endpoints
+between the FastAPI gateway and the high-performance rendering workers. It
+implements a cross-platform strategy that optimizes for low-latency Unix
+Domain Sockets (UDS) on Linux/Docker while falling back to stable TCP
+loopback on Windows environments.
+"""
+
+
 import os
 import platform
 
@@ -28,7 +40,8 @@ def get_socket_path():
 
     # 2. Fallback based on OS
     if platform.system() == "Windows":
-        return "127.0.0.1:8008"
+        windows_override = os.getenv("WORKER_SOCKET_PATH")
+        return windows_override if windows_override else "127.0.0.1:8008"
 
     # 3. Default for Linux/Docker Production
     return "/tmp/sockets/worker.sock"

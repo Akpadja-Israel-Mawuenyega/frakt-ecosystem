@@ -1,3 +1,14 @@
+# service_python/app/configs/logging_config.py
+"""
+Frakt Observability Framework.
+
+This module initializes a centralized, multi-handler logging architecture
+designed for high-performance monitoring and forensic debugging. It implements
+rotating file persistence and custom visual formatting to prioritize
+critical system failures in a high-traffic production environment.
+"""
+
+
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -24,9 +35,9 @@ class FraktFormatter(logging.Formatter):
 
 load_dotenv()
 
-LOG_DIR = os.environ.get("LOG_DIR", "logs")
-LOG_FILE = os.path.join(LOG_DIR, "frakt.log")
-
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_FILENAME = os.getenv("GATEWAY_LOG_FILE", "frakt_gateway.log")
+LOG_PATH = os.path.join(LOG_DIR, LOG_FILENAME)
 
 def setup_logging():
     """
@@ -52,7 +63,7 @@ def setup_logging():
 
     os.makedirs(LOG_DIR, exist_ok=True)
     file_handler = RotatingFileHandler(
-        LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5
+        LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=5
     )
     file_handler.setFormatter(formatter)
 

@@ -1,7 +1,48 @@
+# service_python/app/routers/utils.py
+"""
+Frakt Route Utilities.
+
+A centralized collection of stateless logic used across the generation
+and management routers. This module handles coordinate mapping,
+AI-driven label extension, and secure credential provisioning.
+
+Architecture Note:
+All SVG rendering logic (scaling, mapping, and asset stamping) uses a
+unified coordinate system to ensure consistency between the Python
+generation worker and the FastAPI middleware.
+"""
+
 import re
-import math
+import secrets
+
+from fastapi import Request
+from httpx import AsyncClient
+from app.middleware.middleware import hash_api_key
 
 
+# =============================================================================
+# SECTION 1: AUTHENTICATION & SECURITY
+# =============================================================================
+def generate_secure_api_key(prefix: str = "frakt_live") -> tuple[str, str]:
+    """
+    Generates a high-entropy API key and its corresponding SHA-256 hash.
+
+    Returns:
+        tuple: (raw_key, hashed_key)
+    """
+    # 32 bytes of randomness = ~43 characters of entropy
+    token = secrets.token_urlsafe(32)
+    raw_key = f"{prefix}_{token}"
+
+    # One-way hash for DB storage
+    hashed_key = hash_api_key(raw_key)
+
+    return raw_key, hashed_key
+
+
+# =============================================================================
+# SECTION 2: MATHEMATICAL MAPPING & SCALING
+# =============================================================================
 def extend_labels_for_forecast(user_labels: list, forecast_count: int) -> list:
     """
     Intelligently extends labels for stocks, dates, or generic steps.
@@ -122,11 +163,11 @@ def append_svg_assets(
         y_axis_xml += f'<text x="5" y="{y_pos + 4}">${int(val)}</text>'
     y_axis_xml += "</g>"
 
-   # --- PART B: INTERACTIVE DATA POINTS ---
+    # --- PART B: INTERACTIVE DATA POINTS ---
     dots_xml = '<g id="interactive-points">'
     margin_left = 50
-    draw_width = width - 70 
-    
+    draw_width = width - 70
+
     # We need the total count of labels to calculate spacing correctly
     num_labels = len(labels)
     x_step = draw_width / (num_labels - 1) if num_labels > 1 else 0
@@ -134,7 +175,7 @@ def append_svg_assets(
     for i, curr_y_val in enumerate(y_vals):
         # CALCULATE X: Use the exact same math as the X-axis labels
         curr_x = margin_left + (i * x_step)
-        
+
         # Map Y value using the shared pixel mapper
         y_pos = map_to_pixel(curr_y_val, y_min_calc, y_range_calc, height)
 
@@ -179,3 +220,29 @@ def append_svg_assets(
     # Final Injection
     combined = f"{y_axis_xml}{x_labels_xml}{boundary_xml}{dots_xml}"
     return svg_content.replace("</svg>", f"{combined}</svg>")
+
+
+# =============================================================================
+# SECTION 4: INFRASTRUCTURE & WORKER ACCESS
+# =============================================================================
+def get_worker(request: Request) -> AsyncClient:
+    """
+    Dependency provider for the sandboxed Worker execution client.
+
+    Retrieves the persistent 'httpx.AsyncClient' from the application state.
+    This client is initialized during the 'lifespan' startup sequence to
+    utilize a High-Performance Unix Domain Socket (UDS) transport.
+
+    Using this dependency ensures that the application leverages connection
+    pooling rather than instantiating a new client per request, significantly
+    reducing the latency of inter-container communication.
+
+    Args:
+        request (Request): The incoming FastAPI request object containing
+                          the global 'app.state'.
+
+    Returns:
+        AsyncClient: The shared, non-blocking HTTP client configured
+                      for UDS transport.
+    """
+    return request.app.state.worker_client

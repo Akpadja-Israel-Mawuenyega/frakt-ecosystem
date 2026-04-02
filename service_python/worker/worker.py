@@ -1,3 +1,22 @@
+# service_python/worker/worker.py
+"""
+Frakt Sovereign Worker Muscle.
+
+The high-performance execution node for the Frakt ecosystem. This service
+operates as an isolated rendering engine, receiving Python logic from the
+Gateway and executing it within a strictly resource-constrained sandbox.
+
+Key Architectural Pillars:
+1.  Lifespan Management: Performs a 'Warm-Up' sequence on startup to
+    synchronize the ProcessPool, ensuring zero-latency on the first request.
+2.  Hardware-Enforced Timeouts: Dispatches template logic to sub-processes
+    with a 2.0s watchdog to prevent CPU-pinning attacks.
+3.  Error Propagation: Translates internal 'TemplateExecutionErrors'
+    into standard 400-level HTTP responses for the Gateway to consume.
+4.  Infrastructure Agnostic: Configurable for both Unix Domain Sockets (UDS)
+    and TCP-based local communication.
+"""
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
@@ -8,6 +27,10 @@ from worker.generator import generate_svg_from_template, executor, TemplateExecu
 from worker.logger import worker_logger as logger
 
 
+# =============================================================================
+# SECTION 1: DATA TRANSFER OBJECTS (DTOs)
+# =============================================================================
+
 class ExecutionRequest(BaseModel):
     """DTO for the internal UDS handshake between Gateway and Worker."""
 
@@ -15,6 +38,10 @@ class ExecutionRequest(BaseModel):
     params: Dict[str, Any]
     metadata: Optional[Dict[str, Any]] = None
 
+
+# =============================================================================
+# SECTION 2: LIFECYCLE & PROCESS POOL WARM-UP
+# =============================================================================
 
 def warm_up():
     """
@@ -44,6 +71,10 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Sandbox Executor...")
     executor.shutdown(wait=True)
 
+
+# =============================================================================
+# SECTION 3: THE EXECUTION PIPELINE
+# =============================================================================
 
 app = FastAPI(title="Frakt Sandbox Worker", lifespan=lifespan)
 

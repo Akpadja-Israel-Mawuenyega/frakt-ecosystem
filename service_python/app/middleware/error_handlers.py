@@ -1,4 +1,22 @@
-# app/middleware/error_handlers.py
+# service_python/app/middleware/error_handlers.py
+
+"""
+Frakt Global Exception Lifecycle Management.
+
+A centralized error-handling middleware that intercepts Python exceptions
+and translates them into standardized, RFC-compliant JSON responses.
+
+Key Architectural Pillars:
+1.  Status Accuracy: Maps DB conflicts to 409, timeouts to 504, and system
+    failures to 503/502.
+2.  Observability: Automatically logs warnings, errors, and critical
+    tracebacks via the unified logging config.
+3.  Security: Sanitizes error messages to prevent internal stack traces
+    or database schemas from leaking to the public API.
+4.  Resilience: Provides specific hooks for downstream microservice
+    communication (HTTPX) to handle worker instability.
+"""
+
 
 import httpx
 from fastapi import Request, FastAPI
@@ -18,8 +36,9 @@ def register_error_handlers(app: FastAPI):
     app.add_exception_handler(httpx.TimeoutException, worker_timeout_handler)
     app.add_exception_handler(Exception, global_exception_handler)
 
-
-# 1. DATABASE CONFLICTS
+# =============================================================================
+# SECTION 1: DATABASE LAYER HANDLERS
+# =============================================================================
 async def integrity_handler(request: Request, exc: IntegrityError):
     """
     Handles database constraint violations (e.g., unique name conflicts).
@@ -29,7 +48,6 @@ async def integrity_handler(request: Request, exc: IntegrityError):
     return JSONResponse(status_code=409, content={"detail": "Conflict detected."})
 
 
-# 2. DB SYSTEM FAILURES
 async def database_handler(request: Request, exc: SQLAlchemyError):
     """
     Handles general database execution or connection failures.
@@ -39,7 +57,9 @@ async def database_handler(request: Request, exc: SQLAlchemyError):
     return JSONResponse(status_code=503, content={"detail": "Database unavailable."})
 
 
-# 3. DOWNSTREAM SERVICE FAILURES (The Worker)
+# =============================================================================
+# SECTION 2: DOWNSTREAM (WORKER) SERVICE HANDLERS
+# =============================================================================
 async def worker_http_handler(request: Request, exc: httpx.HTTPStatusError):
     """
     Handles non-200 responses from the sandboxed worker microservice.
@@ -51,7 +71,6 @@ async def worker_http_handler(request: Request, exc: httpx.HTTPStatusError):
     )
 
 
-# 4. DOWNSTREAM TIMEOUTS
 async def worker_timeout_handler(request: Request, exc: httpx.TimeoutException):
     """
     Handles network-level timeouts when communicating with the worker.
@@ -63,7 +82,9 @@ async def worker_timeout_handler(request: Request, exc: httpx.TimeoutException):
     )
 
 
-# 5. THE ULTIMATE SAFETY NET (Generic 500)
+# =============================================================================
+# SECTION 3: GLOBAL EXCEPTION HANDLER (SYSTEM-WIDE SAFETY NET)
+# =============================================================================
 async def global_exception_handler(request: Request, exc: Exception):
     """
     Catch-all for any unhandled Python exceptions.

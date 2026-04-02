@@ -1,4 +1,21 @@
-# worker/generator.py
+# service_python/worker/generator.py
+"""
+Frakt Sandboxed Execution Environment.
+
+This module provides a secure, restricted Python runtime for executing
+user-defined SVG generation logic. It utilizes a multi-layered defense
+strategy to prevent Arbitrary Code Execution (ACE) and resource exhaustion.
+
+Security Architecture:
+1.  Namespace Isolation: Only whitelisted built-ins and safe modules
+    (math, json) are exposed to the 'exec' environment.
+2.  Process Isolation: Every execution occurs in a separate OS process
+    via ProcessPoolExecutor, preventing memory leakage into the main worker.
+3.  Time-Boxing: A hard 2.0s timeout is enforced per execution to
+    neutralize infinite loops and 'zip bomb' complexity.
+4.  Type Enforcement: Validates that the execution results in a
+    standardized 'svg_output' string before returning to the Gateway.
+"""
 
 import os
 import json
@@ -10,6 +27,9 @@ from concurrent.futures import ProcessPoolExecutor, TimeoutError
 logger = logging.getLogger("worker")
 
 
+# =============================================================================
+# SECTION 1: SECURITY CONFIGURATION & SANDBOX LIMITS
+# =============================================================================
 class TemplateExecutionError(Exception):
     """
     Raised when template execution violates safety constraints or fails internal logic.
@@ -43,6 +63,9 @@ ALLOWED_FUNCS = {
 executor = ProcessPoolExecutor(max_workers=os.cpu_count() or 2)
 
 
+# =============================================================================
+# SECTION 2: THE SANDBOX CORE (RESTRICTED EXECUTION ENVIRONMENT)
+# =============================================================================
 def _worker_execute(
     template_code: str, params: Dict[str, Any], metadata: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -73,6 +96,9 @@ def _worker_execute(
         return {"status": "error", "message": f"{type(e).__name__}: {str(e)}"}
 
 
+# =============================================================================
+# SECTION 3: ORCHESTRATION & RESOURCE ENFORCEMENT
+# =============================================================================
 def generate_svg_from_template(
     template_code: str, params: Dict[str, Any], metadata: Optional[Dict[str, Any]]
 ) -> str:

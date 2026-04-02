@@ -1,4 +1,10 @@
 # service_python/tier_config.py
+"""
+Frakt Subscription Tier & Quota Registry.
+
+Defines the rate limits and monthly usage quotas for each customer tier.
+"""
+
 
 TIER_LIMITS = {
     "free": {"rate": "5/minute", "quota": 100},

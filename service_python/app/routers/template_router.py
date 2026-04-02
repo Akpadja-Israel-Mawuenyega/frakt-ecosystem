@@ -1,4 +1,25 @@
-# template_router.py
+# service_python/app/routers/template_router.py
+"""
+Frakt Template Management Router.
+
+This module provides the administrative interface for managing sandboxed
+SVG generation logic. it enables multi-tenant CRUD operations while
+enforcing strict ownership boundaries via lookups.
+
+Architectural Workflow:
+1.  Identity Verification: Resolves the tenant via the 'x-api-key' middleware.
+2.  Schema Validation: Utilizes Pydantic models (TemplateCreate/Update)
+    to sanitize incoming Python code and JSON parameters.
+3.  Ownership Enforcement: Every database query is scoped to the
+    'current_customer.id' to prevent cross-tenant data leakage.
+4.  Conflict Resolution: Handles naming collisions (e.g., duplicate
+    template names for a single user) via global error handlers.
+
+Security Note:
+The 'template_code' stored here is executed in a restricted environment.
+This router ensures that only authenticated users can modify the
+logic associated with their unique Namespace.
+"""
 
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
@@ -6,11 +27,16 @@ from sqlalchemy.orm import Session
 
 from app.configs.limiter_config import limiter
 from app.configs.logging_config import logger
-from app.middleware.middleware import get_current_customer, get_tier_limit
+from app.audit import log_event, LogSeverity
+from app.middleware.middleware import get_current_active_customer, get_tier_limit
 from app.database.database import get_db
 from app.database.models import Customer, SVGTemplate
 from app.database.schemas import TemplateCreate, TemplateUpdate, TemplateResponse
 
+
+# =============================================================================
+# SECTION 1: ROUTER INITIALIZATION
+# =============================================================================
 router = APIRouter(
     prefix="/templates",
     tags=["SVG Template Management"],
@@ -18,13 +44,15 @@ router = APIRouter(
 )
 
 
-# --- CREATE ---
+# =============================================================================
+# SECTION 2A: TEMPLATE CREATION ENDPOINT
+# =============================================================================
 @router.post("/", status_code=status.HTTP_201_CREATED)
 @limiter.limit(get_tier_limit)
 def create_template(
     request: Request,
     template_data: TemplateCreate,
-    customer: Customer = Depends(get_current_customer),
+    customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
 ):
     """
@@ -63,6 +91,15 @@ def create_template(
     )
     db.add(new_template)
     db.commit()
+    log_event(
+        db=db,
+        customer_id=customer.id,
+        action="TEMPLATE_CREATED",
+        endpoint=f"/templates/{new_template.id}",
+        request=request,
+        status_code=201,
+        severity=LogSeverity.INFO,
+    )
     db.refresh(new_template)
 
     logger.info(
@@ -71,10 +108,13 @@ def create_template(
     return {"message": "Template created", "id": new_template.id}
 
 
-# --- LIST ALL ---
+# =============================================================================
+# SECTION 2B: BULK TEMPLATE RETRIEVAL ENDPOINT
+# =============================================================================
 @router.get("/", response_model=List[TemplateResponse])
 def list_templates(
-    customer: Customer = Depends(get_current_customer), db: Session = Depends(get_db)
+    customer: Customer = Depends(get_current_active_customer),
+    db: Session = Depends(get_db),
 ):
     """
     Retrieve all templates owned by the authenticated customer.
@@ -89,11 +129,13 @@ def list_templates(
     return db.query(SVGTemplate).filter(SVGTemplate.owner_id == customer.id).all()
 
 
-# --- GET ONE ---
+# =============================================================================
+# SECTION 2C: SINGLE TEMPLATE RETRIEVAL ENDPOINT
+# =============================================================================
 @router.get("/{template_id}", response_model=TemplateResponse)
 def get_template(
-    template_id: int,
-    customer: Customer = Depends(get_current_customer),
+    template_id: str,
+    customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
 ):
     """
@@ -117,12 +159,14 @@ def get_template(
     return template
 
 
-# --- UPDATE ---
+# =============================================================================
+# SECTION 2D: TEMPLATE UPDATE ENDPOINT
+# =============================================================================
 @router.patch("/{template_id}")
 def update_template(
-    template_id: int,
+    template_id: str,
     update_data: TemplateUpdate,
-    customer: Customer = Depends(get_current_customer),
+    customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
 ):
     """
@@ -158,11 +202,14 @@ def update_template(
     return {"message": "Template updated successfully"}
 
 
-# --- DELETE ---
+# =============================================================================
+# SECTION 2E: TEMPLATE DELETE ENDPOINT
+# =============================================================================
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_template(
-    template_id: int,
-    customer: Customer = Depends(get_current_customer),
+    request: Request,
+    template_id: str,
+    customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
 ):
     """
@@ -190,5 +237,14 @@ def delete_template(
 
     db.delete(template)
     db.commit()
+    log_event(
+        db=db,
+        customer_id=customer.id,
+        action="TEMPLATE_DELETED",
+        request=request,
+        endpoint=f"/templates/{template_id}",
+        status_code=204,
+        severity=LogSeverity.WARNING,  # Warning because this is an irreversible action
+    )
     logger.warning(f"Template {template_id} deleted by user {customer.id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

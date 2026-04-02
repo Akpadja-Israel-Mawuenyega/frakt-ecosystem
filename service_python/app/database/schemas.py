@@ -1,4 +1,17 @@
-# service_python/schemas.py
+# service_python/app/database/schemas.py
+"""
+Frakt Data Transfer Objects (DTOs).
+
+A centralized repository of Pydantic models used for request validation,
+response serialization, and API documentation. These schemas enforce
+strict type-safety between the FastAPI routers and the underlying
+SQLAlchemy ORM layer.
+
+Key Architectural Pillars:
+1.  Validation: Enforces constraints (min/max length) before DB insertion.
+2.  Serialization: Sanitizes database records for public API consumption.
+"""
+
 
 from pydantic import BaseModel, Field
 from typing import List, Dict, Literal, Optional, Any
@@ -92,8 +105,8 @@ class TemplateResponse(BaseModel):
     while enforcing the specific structure of the public API.
     """
 
-    id: int
-    owner_id: int
+    id: str
+    owner_id: str
     template_name: str
     template_code: str
     required_params: Dict[str, Any]

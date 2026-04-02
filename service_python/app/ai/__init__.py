@@ -1,4 +1,4 @@
-# app/ai/__init__.py
+# service_python/app/ai/__init__.py
 
 """
 Frakt AI: Infrastructure and Analytical Support Layer.

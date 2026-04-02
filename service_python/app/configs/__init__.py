@@ -1,4 +1,4 @@
-# app/configs/__init__.py
+# service_python/app/configs/__init__.py
 
 """
 Configuration Package

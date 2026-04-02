@@ -1,3 +1,4 @@
+# service_python/app/ai/constants.py
 """
 Frakt AI: Global Configuration & Guardrails
 """

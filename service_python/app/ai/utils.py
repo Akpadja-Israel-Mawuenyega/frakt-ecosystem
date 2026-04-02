@@ -1,7 +1,25 @@
+# service_python/app/ai/utils.py
+"""
+Frakt Predictive Intelligence Utilities.
+
+A specialized toolkit for data preprocessing and post-inference
+optimization. This module provides the mathematical weighting logic
+used to bias models toward recent performance and enforces safety
+guardrails on AI-generated outputs.
+
+Architecture Note:
+All functions are designed to operate on NumPy arrays for high-performance
+vectorized math, ensuring the AI engine remains responsive even under
+heavy multi-tenant loads.
+"""
+
 import numpy as np
 from . import constants
 
 
+# =============================================================================
+# SECTION 1: DATA PREPROCESSING (MODEL BIASING)
+# =============================================================================
 def get_exponential_weights(n_points: int) -> np.ndarray:
     """
     Generates an exponential decay vector for sample weighting.
@@ -13,6 +31,9 @@ def get_exponential_weights(n_points: int) -> np.ndarray:
     return weights / weights.max()
 
 
+# =============================================================================
+# SECTION 2: INFERENCE GUARDRAILS (POST-PROCESSING)
+# =============================================================================
 def apply_prediction_limits(preds, y):
     """
     Applies heuristic guardrails to the model output.
