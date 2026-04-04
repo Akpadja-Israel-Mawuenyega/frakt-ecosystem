@@ -157,8 +157,15 @@ async def generate_svg(
             status_code=500,
             severity=LogSeverity.CRITICAL,
         )
+        
+        # 2. REFUND: Roll back the usage_count since the server failed
+        db.execute(
+            update(Customer)
+            .where(Customer.id == customer.id)
+            .values(usage_count=Customer.usage_count - 1)
+        )
         db.commit()  # Ensure the log is saved before crashing
-        # 2. Re-raise the exception to trigger global error handlers and return a 500 response
+        # 3. Re-raise the exception to trigger global error handlers and return a 500 response
         logger.error(f"Worker Failure: {str(e)}")
         raise e
 
@@ -249,6 +256,20 @@ async def generate_predictive_svg(
     # AI Method handling: Default to auto if not provided or set to none
     requested_method = data.ai_method if data.ai_method != "none" else "auto"
 
+    # Premium endpoint fixed charge
+    credits_to_deduct = 2
+    result = db.execute(
+        update(Customer)
+        .where(Customer.id == customer.id)
+        .where(Customer.usage_count + credits_to_deduct <= tier_config["quota"])
+        .values(usage_count=Customer.usage_count + credits_to_deduct)
+    )
+
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=403, detail="Quota exceeded during transaction."
+        )
+
     ai_results = None
     # Predictive logic is always executed for this endpoint
     ai_results = PredictiveEngine.get_trend(raw_points, method=requested_method)
@@ -298,20 +319,6 @@ async def generate_predictive_svg(
         "stroke_color": data.params.get("stroke_color", "#2ecc71"),
     }
 
-    # Premium endpoint fixed charge
-    credits_to_deduct = 2
-    result = db.execute(
-        update(Customer)
-        .where(Customer.id == customer.id)
-        .where(Customer.usage_count + credits_to_deduct <= tier_config["quota"])
-        .values(usage_count=Customer.usage_count + credits_to_deduct)
-    )
-
-    if result.rowcount == 0:
-        raise HTTPException(
-            status_code=403, detail="Quota exceeded during transaction."
-        )
-
     payload = {
         "template_code": template.template_code,
         "params": unified_params,
@@ -336,8 +343,16 @@ async def generate_predictive_svg(
             status_code=500,
             severity=LogSeverity.CRITICAL,
         )
+        
+        # 2. REFUND: Roll back the usage_count since the server failed
+        db.execute(
+            update(Customer)
+            .where(Customer.id == customer.id)
+            .values(usage_count=Customer.usage_count - credits_to_deduct)
+        )
+        
         db.commit()  # Ensure the log is saved before crashing
-        # 2. Re-raise the exception to trigger global error handlers and return a 500 response
+        # 3. Re-raise the exception to trigger global error handlers and return a 500 response
         logger.error(f"Worker Failure: {str(e)}")
         raise e
 
