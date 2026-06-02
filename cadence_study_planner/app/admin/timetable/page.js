@@ -45,9 +45,9 @@ export default function AdminTimetableCompiler() {
   const logContainerRef = useRef(null);
 
   // Helper to append diagnostic traces to our view console
-  const addLog = (text, type = 'ok') => {
+  const setSingleLog = (text, type = 'ok') => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setLogs(prev => [...prev, { text, type, time: now }]);
+    setLogs([{ text, type, time: now }]);
   };
 
   /**
@@ -117,52 +117,101 @@ export default function AdminTimetableCompiler() {
   };
 
   /**
+   * Utility delay function for simulating async wait times in logs (optional).
+   */
+  const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  /**
    * Dispatches a compilation command to our backend engine
    */
   const handleCompileExecution = async () => {
-    if (loading) return;
+  if (loading) return;
 
-    setLoading(true);
-    setStatus('Compiling');
-    setLogs([]); // Reset log stream for clean output parsing
-    addLog("Initializing greedy conflict constraint resolver...", "ok");
+  setLoading(true);
+  setStatus('Compiling');
 
-    try {
-      const response = await fetch('/api/timetable/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-role': 'admin'
-        }
-      });
+  setSingleLog(
+    "Initializing greedy conflict constraint resolver..."
+    );
+    
+  await wait(800); 
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || `HTTP Compilation Crash: ${response.status}`);
+  try {
+    const response = await fetch('/api/timetable/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': 'admin'
       }
+    });
 
-      if (result.success && result.data?.scheduleMatrix) {
-        const activeMatrix = result.data.scheduleMatrix;
-        setMatrix(activeMatrix);
-        calculateTelemetry(activeMatrix);
-        
-        addLog("Sorting active demands by slot load requirements (descending)...", "ok");
-        addLog("Scanning operational timelines for cross-lecturer double bookings...", "ok");
-        addLog("Schedule array upserted into core database collection safely.", "ok");
-        addLog("Timetable compilation complete — matrix updated successfully.", "ok");
-        setStatus('Compiled');
-      } else {
-        throw new Error("Target data structure returned malformed values.");
-      }
+    setSingleLog(
+      "Compilation engine responded successfully."
+    );
 
-    } catch (err) {
-      addLog(`Compilation Failure: ${err.message}`, "warn");
-      setStatus('Error');
-    } finally {
-      setLoading(false);
+    await wait(500);
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        result.message || `HTTP Compilation Crash: ${response.status}`
+      );
     }
-  };
+
+    setSingleLog(
+      "Parsing generated allocation matrix..."
+    );
+
+    await wait(500);
+
+    if (result.success && result.data?.scheduleMatrix) {
+
+      const activeMatrix = result.data.scheduleMatrix;
+
+      setSingleLog(
+        "Updating active timetable state..."
+      );
+
+      await wait(300);
+
+      setMatrix(activeMatrix);
+
+      setSingleLog(
+        "Recalculating telemetry metrics..."
+      );
+
+      await wait(300);
+
+      calculateTelemetry(activeMatrix);
+
+      setSingleLog(
+        "Timetable compilation completed successfully."
+      );
+
+      setStatus('Compiled');
+
+    } else {
+      throw new Error(
+        "Target data structure returned malformed values."
+      );
+    }
+
+  } catch (err) {
+
+    await wait(500); // Simulate delay before logging error
+
+    setSingleLog(
+      `Compilation Failure: ${err.message}`,
+      "warn"
+    );
+
+    setStatus('Error');
+
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="page" style={{ padding: '2rem 0', fontFamily: 'var(--font-sans, system-ui, sans-serif)' }}>
@@ -196,6 +245,8 @@ export default function AdminTimetableCompiler() {
         .empty { color: #444; font-size: 12px; font-style: italic; }
         .log { border: 0.5px solid #222; border-radius: 8px; overflow-y: auto; max-height: 220px; background: #070707; }
         .log-row { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; border-bottom: 0.5px solid #111; font-size: 13px; color: #ccc; }
+        .log-row.ok { background: rgba(16, 185, 129, 0.03); }
+        .log-row.warn { background: rgba(245, 158, 11, 0.03); } 
         .spinner { width: 14px; height: 14px; border: 2px solid #333; border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
       ` }} />
@@ -289,7 +340,7 @@ export default function AdminTimetableCompiler() {
       
       <div className="log" ref={logContainerRef}>
         {logs.map((log, i) => (
-          <div className="log-row" key={i}>
+          <div className={`log-row ${log.type}`} key={i}>
             <span
               style={{
                 color: log.type === 'ok' ? '#10b981' : '#f59e0b',
