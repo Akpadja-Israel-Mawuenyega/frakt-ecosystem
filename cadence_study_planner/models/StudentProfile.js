@@ -1,64 +1,171 @@
 import mongoose from 'mongoose';
+import CourseReferenceSchema from '@/models/shared/CourseReference';
 
 /**
+ * ───────────────────────────── LEARNING RESOURCE ────────────────────────────
+ * AI-ingestible academic resource attached to a student profile.
+ *
+ * Supports:
+ * - URLs
+ * - Uploaded text notes
+ * - OpenAlex papers
+ * - Future embeddings/vectorization
+ *
  * @typedef {Object} LearningResource
- * @property {string} title - The display name of the resource (e.g., Paper title, web bookmark name).
- * @property {'url'|'text'|'scholar_paper'} type - The architectural format classification of the target payload.
- * @property {string} contentData - The contextual storage payload (URL string, raw text blocks, or abstract metadata).
- * @property {Date} addedAt - The timestamp when this resource vector was appended to the profile.
+ * @property {string} title - Human-readable display title.
+ * @property {'url'|'text'|'scholar_paper'} type - Resource classification.
+ * @property {string} contentData - Core payload content.
+ * @property {Date} addedAt - Resource insertion timestamp.
  */
+const LearningResourceSchema = new mongoose.Schema({
+
+  title: {
+    type: String,
+    required: true,
+    trim: true
+  },
+
+  type: {
+    type: String,
+    enum: ['url', 'text', 'scholar_paper'],
+    required: true
+  },
+
+  contentData: {
+    type: String,
+    required: true
+  },
+
+  addedAt: {
+    type: Date,
+    default: Date.now
+  }
+
+}, { _id: false });
 
 /**
+ * ───────────────────────────── STUDENT PROFILE ──────────────────────────────
+ * Centralized academic + AI personalization profile.
+ *
+ * Powers:
+ * - AI study planner
+ * - Personal timetable generation
+ * - Resource indexing
+ * - Future recommendation systems
+ * - Adaptive scheduling
+ *
  * @typedef {Object} StudentProfile
- * @property {mongoose.Types.ObjectId} _id - The unique identifier for this profile.
- * @property {mongoose.Types.ObjectId} userId - Reference linking directly back to the matching credential record in the User collection.
- * @property {string} studentId - The official academic registry index number for the student.
- * @property {string} name - The student's full name.
- * @property {string} cohort - The academic track identifier matching structural master timetable slots (e.g., 'L400_CS_A').
- * @property {string[]} enrolledCourses - Array of course codes currently assigned to this student context for AI indexing.
- * @property {LearningResource[]} learningResources - Embedded document array hosting the student's scraped or uploaded study assets.
- * @property {Date} createdAt - Profile generation timestamp.
- * @property {Date} updatedAt - Last database update timestamp.
- */
-
-/**
- * Mongoose Schema blueprint governing localized student academic parameters and AI study planner source arrays.
- * @type {mongoose.Schema<StudentProfile>}
+ * @property {mongoose.Types.ObjectId} _id - MongoDB document ID.
+ * @property {mongoose.Types.ObjectId} userId - Reference to the associated User account.
+ * @property {string} studentId - Institutional student identifier (e.g., matric number).
+ * @property {string} name - Full legal name of the student.
+ * @property {string} cohort - Cohort identifier matching timetable assignments (e.g., "Level 300 CS A").
+ * @property {CourseReference[]} enrolledCourses - Array of courses the student is enrolled in, using the canonical CourseReference structure.
+ * @property {LearningResource[]} learningResources - Array of AI-ingestible academic resources attached to the student profile.
+ * @property {Object} preferences - Optional AI preference payload for future personalized scheduling features (e.g., preferredStudyTime, avoidFridays).
+ * @property {Date} createdAt - Timestamp of when the profile was created.
+ * @property {Date} updatedAt - Timestamp of when the profile was last updated.
  */
 const StudentProfileSchema = new mongoose.Schema({
-  userId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
+
+  /**
+   * Authentication account linkage.
+   */
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
-  studentId: { 
-    type: String, 
-    required: true, 
-    unique: true, 
-    trim: true 
+
+  /**
+   * Institutional registry number.
+   */
+  studentId: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
   },
-  name: { 
-    type: String, 
-    required: true 
+
+  /**
+   * Full legal student name.
+   */
+  name: {
+    type: String,
+    required: true,
+    trim: true
   },
-  cohort: { 
-    type: String, 
-    required: true 
+
+  /**
+   * Cohort identifier matching timetable assignments.
+   *
+   * Example:
+   * "Level 300 CS A"
+   */
+  cohort: {
+    type: String,
+    required: true,
+    trim: true
   },
-  enrolledCourses: [{ 
-    type: String, 
-    trim: true 
-  }],
-  learningResources: [{
-    title: { type: String, required: true },
-    type: { type: String, enum: ['url', 'text', 'scholar_paper'], required: true },
-    contentData: { type: String, required: true },
-    addedAt: { type: Date, default: Date.now }
-  }]
-}, { timestamps: true });
+
+  /**
+   * Canonical enrolled course array.
+   *
+   * Uses SAME structure as institutional timetable engine.
+   */
+  enrolledCourses: {
+    type: [CourseReferenceSchema],
+    default: []
+  },
+
+  /**
+   * AI planner academic context resources.
+   */
+  learningResources: {
+    type: [LearningResourceSchema],
+    default: []
+  }, 
+
+  /**
+   * Optional AI preference payload for future personalized scheduling features.
+   */
+  preferences: {
+    type: new mongoose.Schema({
+      preferredStudyTime: {
+        type: String,
+        enum: ['morning', 'afternoon', 'evening'],
+        default: 'evening'
+      },
+
+      avoidFridays: {
+        type: Boolean,
+        default: false
+      },
+
+      maxDailyStudyBlocks: {
+        type: Number,
+        default: 2,
+        min: 1,
+        max: 6
+      }
+
+    }, { _id: false }),
+
+    default: () => ({})
+  }
+}, {
+  timestamps: true
+});
 
 /**
- * Data Access Object mapping explicitly to the 'student_profiles' collection.
- * @type {mongoose.Model<StudentProfile>}
+ * ───────────────────────────── MODEL EXPORT ─────────────────────────────
  */
-export default mongoose.models.StudentProfile || mongoose.model('StudentProfile', StudentProfileSchema, 'student_profiles');
+const StudentProfile =
+  mongoose.models.StudentProfile ||
+  mongoose.model(
+    'StudentProfile',
+    StudentProfileSchema,
+    'student_profiles'
+  );
+
+export default StudentProfile;

@@ -1,56 +1,182 @@
 import mongoose from 'mongoose';
+import CourseReferenceSchema from '@/models/shared/CourseReference';
 
 /**
- * @typedef {Object} TimetableAssignment
- * @property {string|null} assignedClass - The specific cohort group occupying this slot (e.g., 'L400_CS_A'), or null if open.
- * @property {string|null} assignedCourse - The combined tracking code and name descriptor (e.g., 'CS401 - Networks').
- * @property {string|null} assignedLecturer - The full name of the instructor locked to this time block block.
+ * ─────────────────────────── TIMETABLE ASSIGNMENT ───────────────────────────
+ * Represents one actual allocation inside a slot.
+ *
+ * Multiple assignments may exist in the same slot:
+ * Example:
+ * - Different cohorts
+ * - Different rooms
+ * - Different lecturers
+ * - Same time block
  */
+const TimetableAssignmentSchema = new mongoose.Schema({
+  assignedClass: {
+    type: String,
+    default: null,
+    trim: true
+  },
+
+  assignedCourse: {
+    type: CourseReferenceSchema,
+    default: null
+  },
+
+  assignedLecturer: {
+    type: String,
+    default: null,
+    trim: true
+  },
+
+  assignedRoom: {
+    type: String,
+    default: null,
+    trim: true
+  }
+}, { _id: false });
 
 /**
- * @typedef {Object} TimeSlotGroup
- * @property {string} timeSlot - The exact string block interval coordinates (e.g., '08:30-11:30').
- * @property {TimetableAssignment[]} assignments - Collection of parallel cohort bookings assigned to this discrete time block.
+ * ─────────────────────────────── TIME SLOT GROUP ────────────────────────────
+ * Represents a single institutional time block.
+ *
+ * Example:
+ * "08:30-11:30"
  */
+const TimeSlotGroupSchema = new mongoose.Schema({
+  timeSlot: {
+    type: String,
+    required: true,
+    trim: true
+  },
+
+  assignments: {
+    type: [TimetableAssignmentSchema],
+    default: []
+  }
+}, { _id: false });
 
 /**
- * @typedef {Object} Timetable
- * @property {mongoose.Types.ObjectId} _id - Unique database identifier for the compiled master timetable instance.
- * @property {string} academicYear - The targeting operational academic session string (defaults to "2025/2026").
- * @property {number} semester - The active academic semester number tracking indicator (defaults to 2).
- * @property {Object} scheduleMatrix - A key-value map where keys are working days (e.g., 'Monday') pointing to time slot configuration arrays.
- * @property {Date} createdAt - Timestamp indicating when this target matrix configuration was first saved.
- * @property {Date} updatedAt - Timestamp tracking the last structural change or recompile save execution.
- */
-
-/**
- * Mongoose Schema blueprint governing the saved output matrix processed by the greedy conflict constraint resolver.
- * @type {mongoose.Schema<Timetable>}
+ * ──────────────────────────────── MAIN MODEL ────────────────────────────────
+ * Institutional timetable root document.
+ *
+ * scheduleMatrix structure:
+ *
+ * {
+ *   Monday: [
+ *     {
+ *       timeSlot: "08:30-11:30",
+ *       assignments: [...]
+ *     }
+ *   ],
+ *
+ *   Tuesday: [...]
+ * }
  */
 const TimetableSchema = new mongoose.Schema({
-  academicYear: { 
-    type: String, 
-    required: true, 
-    default: "2025/2026" 
+  academicYear: {
+    type: String,
+    required: true,
+    default: "2025/2026",
+    trim: true
   },
-  semester: { 
-    type: Number, 
-    required: true, 
-    default: 2 
+
+  semester: {
+    type: Number,
+    required: true,
+    default: 2,
+    min: 1
   },
-  // We use Mixed here because the scheduler generates a plain JS object.
-  // This avoids CastErrors where Mongoose tries to force a Map instance
-  // onto a standard POJO (Plain Old JavaScript Object).
+
+  /**
+   * Day-keyed timetable matrix.
+   *
+   * Uses Map instead of Mixed to enforce validation while
+   * still supporting dynamic weekday keys.
+   */
   scheduleMatrix: {
-    type: mongoose.Schema.Types.Mixed,
+    type: Map,
+    of: [TimeSlotGroupSchema],
     required: true
+  },
+
+  /**
+   * Timetable classification.
+   * Future-safe for:
+   * - institutional
+   * - personal
+   * - draft
+   * - optimized
+   */
+  type: {
+    type: String,
+    enum: ['institutional', 'personal'],
+    default: 'institutional'
+  },
+
+  /**
+   * Optional future linkage:
+   * Personal timetable ownership.
+   */
+  studentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+
+  /**
+   * Optional AI preference payload.
+   * Example:
+   * {
+   *   prefersMorning: true,
+   *   freeFriday: false
+   * }
+   */
+  preferences: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+
+  /**
+   * Tracks which institutional timetable
+   * a personal timetable was derived from.
+   */
+  generatedFrom: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Timetable',
+    default: null
   }
-}, { timestamps: true });
+
+}, {
+  timestamps: true
+});
 
 /**
- * Data Access Object mapping explicitly to the 'timetables' collection.
- * @type {mongoose.Model<Timetable>}
+ * Useful compound index:
+ * Prevents duplicate institutional timetable versions
+ * for the same academic session.
  */
-const Timetable = mongoose.models.Timetable || mongoose.model('Timetable', TimetableSchema, 'timetables');
+TimetableSchema.index({
+  academicYear: 1,
+  semester: 1,
+  type: 1
+}, {
+  unique: true,
+  partialFilterExpression: {
+    type: 'institutional'
+  }
+});
+
+/**
+ * ───────────────────────────── MODEL EXPORT ─────────────────────────────
+ */
+const Timetable =
+  mongoose.models.Timetable ||
+  mongoose.model(
+    'Timetable',
+    TimetableSchema,
+    'timetables'
+  );
 
 export default Timetable;

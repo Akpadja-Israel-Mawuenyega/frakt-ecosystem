@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
  * @property {mongoose.Types.ObjectId} _id - The unique operational identifier for the user.
  * @property {string} name - The full name of the user actor.
  * @property {string} email - The unique login email address, stored in lowercase.
- * @property {string} password - The authentication credential string (plain-text for dev, hashed in prod).
+ * @property {string} passwordHash - The hashed authentication credential string.
  * @property {'admin'|'student'} role - The system authorization role governing access to specific dashboard loops.
  * @property {Date} createdAt - Timestamp indicating when the user identity was provisioned.
  * @property {Date} updatedAt - Timestamp indicating the last modification date of the account.
@@ -27,7 +27,7 @@ const UserSchema = new mongoose.Schema({
     lowercase: true, 
     trim: true 
   },
-  password: { 
+  passwordHash: { 
     type: String, 
     required: true 
   },

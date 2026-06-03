@@ -9,10 +9,18 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@next/swc-win32-x64-msvc": "^16.2.7",
+    "bcryptjs": "^3.0.3",
     "mongoose": "^9.6.3",
     "next": "^16.2.7",
+    "next-auth": "^4.24.14",
     "openai": "^6.40.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.19"
   }
 }

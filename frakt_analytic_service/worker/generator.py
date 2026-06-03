@@ -7,13 +7,16 @@ user-defined SVG generation logic. It utilizes a multi-layered defense
 strategy to prevent Arbitrary Code Execution (ACE) and resource exhaustion.
 
 Security Architecture:
-1.  Namespace Isolation: Only whitelisted built-ins and safe modules
+1.  Compile-Time AST Restriction: RestrictedPython rewrites the AST before
+    execution, blocking __class__, __bases__, and __subclasses__ traversal
+    at the bytecode level — neutralizing object hierarchy escape attempts.
+2.  Namespace Isolation: Only whitelisted built-ins and safe modules
     (math, json) are exposed to the 'exec' environment.
-2.  Process Isolation: Every execution occurs in a separate OS process
+3.  Process Isolation: Every execution occurs in a separate OS process
     via ProcessPoolExecutor, preventing memory leakage into the main worker.
-3.  Time-Boxing: A hard 2.0s timeout is enforced per execution to
+4.  Time-Boxing: A hard 2.0s timeout is enforced per execution to
     neutralize infinite loops and 'zip bomb' complexity.
-4.  Type Enforcement: Validates that the execution results in a
+5.  Type Enforcement: Validates that the execution results in a
     standardized 'svg_output' string before returning to the Gateway.
 """
 
@@ -24,12 +27,17 @@ import logging
 from typing import Dict, Any, Optional
 from concurrent.futures import ProcessPoolExecutor, TimeoutError
 
+from RestrictedPython import compile_restricted, safe_globals, safe_builtins
+from RestrictedPython.Guards import guarded_iter_unpack_sequence
+
 logger = logging.getLogger("worker")
 
 
 # =============================================================================
 # SECTION 1: SECURITY CONFIGURATION & SANDBOX LIMITS
 # =============================================================================
+
+
 class TemplateExecutionError(Exception):
     """
     Raised when template execution violates safety constraints or fails internal logic.
@@ -55,7 +63,7 @@ ALLOWED_FUNCS = {
     "sum": sum,
     "round": round,
     "enumerate": enumerate,
-    "zip": zip
+    "zip": zip,
 }
 
 # Persistent process pool to avoid the overhead of spawning new OS processes per request.
@@ -66,31 +74,53 @@ executor = ProcessPoolExecutor(max_workers=os.cpu_count() or 2)
 # =============================================================================
 # SECTION 2: THE SANDBOX CORE (RESTRICTED EXECUTION ENVIRONMENT)
 # =============================================================================
+
+
 def _worker_execute(
     template_code: str, params: Dict[str, Any], metadata: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
-    Executes raw Python code within a restricted namespace.
+    Compiles and executes raw Python code within a RestrictedPython namespace.
 
-    This is the lowest-level sandbox. It isolates the execution scope so that
-    template variables cannot leak into the worker's own memory space.
+    Adds a compile-time AST rewriting layer on top of the existing namespace
+    isolation. RestrictedPython transforms the source before execution,
+    blocking dangerous attribute traversal patterns such as:
+        ().__class__.__bases__[0].__subclasses__()
+    at the bytecode level — making object hierarchy escape attempts impossible
+    even if the attacker bypasses the builtins whitelist.
 
     Args:
-        template_code: The Python string to be evaluated.
+        template_code: The Python string to be compiled and evaluated.
         params: Client-provided data for SVG rendering.
         metadata: Optional configuration (colors, dimensions, branding).
 
     Returns:
         A dictionary containing the 'success' status and the 'svg_output' string.
     """
-    globals_scope = {"__builtins__": ALLOWED_FUNCS}
-    globals_scope.update(SAFE_MODULES)
+    # Compile phase — RestrictedPython catches dangerous syntax and
+    # rewrites the AST before any execution occurs.
+    try:
+        byte_code = compile_restricted(
+            template_code, filename="<frakt_template>", mode="exec"
+        )
+    except SyntaxError as e:
+        return {"status": "error", "message": f"SyntaxError: {str(e)}"}
 
-    # execution_scope acts as the local variable store for the 'exec' call
+    # Build a RestrictedPython-hardened globals scope.
+    # safe_globals + safe_builtins block __subclasses__ walks at runtime
+    # as a second defensive layer behind the compile-time rewrite.
+    restricted_globals = {
+        **safe_globals,
+        "__builtins__": {**safe_builtins, **ALLOWED_FUNCS},
+        "_iter_unpack_sequence_": guarded_iter_unpack_sequence,
+        **SAFE_MODULES,
+    }
+
+    # execution_scope acts as the local variable store for the exec call
     execution_scope = {"params": params, "metadata": metadata or {}, "svg_output": None}
 
     try:
-        exec(template_code, globals_scope, execution_scope)
+        exec(byte_code, restricted_globals, execution_scope)
         return {"status": "success", "output": execution_scope.get("svg_output")}
     except Exception as e:
         return {"status": "error", "message": f"{type(e).__name__}: {str(e)}"}
@@ -99,6 +129,8 @@ def _worker_execute(
 # =============================================================================
 # SECTION 3: ORCHESTRATION & RESOURCE ENFORCEMENT
 # =============================================================================
+
+
 def generate_svg_from_template(
     template_code: str, params: Dict[str, Any], metadata: Optional[Dict[str, Any]]
 ) -> str:
@@ -114,7 +146,7 @@ def generate_svg_from_template(
 
     Raises:
         TemplateExecutionError: If execution times out, returns invalid types,
-                                or encounters a Python Exception.
+                                or encounters a Python or sandbox Exception.
     """
     future = executor.submit(_worker_execute, template_code, params, metadata)
 

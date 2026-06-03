@@ -173,7 +173,7 @@ export default function AdminTimetableCompiler() {
         "Updating active timetable state..."
       );
 
-      await wait(300);
+      await wait(500);
 
       setMatrix(activeMatrix);
 
@@ -181,7 +181,7 @@ export default function AdminTimetableCompiler() {
         "Recalculating telemetry metrics..."
       );
 
-      await wait(300);
+      await wait(500);
 
       calculateTelemetry(activeMatrix);
 

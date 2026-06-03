@@ -201,7 +201,7 @@ export async function POST(request) {
     const currentTimetable = await Timetable.findOneAndUpdate(
       { academicYear, semester },
       { scheduleMatrix: solvedScheduleMatrix },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
     return NextResponse.json({

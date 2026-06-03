@@ -1,9 +1,11 @@
-// app/layout.js
+import "./globals.css";
+import Providers from "./Providers";
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
