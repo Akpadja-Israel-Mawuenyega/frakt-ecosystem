@@ -26,7 +26,7 @@ const getCohortColorClass = (cohort) => {
 
 /**
  * Admin Timetable Compiler Interface
- * Connects directly to the backend greedy constraint engine.
+ * Connects directly to the backend genetic-algorithm scheduling engine.
  */
 export default function AdminTimetableCompiler() {
   const [loading, setLoading] = useState(false);
@@ -131,7 +131,7 @@ export default function AdminTimetableCompiler() {
   setStatus('Compiling');
 
   setSingleLog(
-    "Initializing greedy conflict constraint resolver..."
+    "Initializing genetic algorithm scheduling engine..."
     );
     
   await wait(800); 
@@ -140,8 +140,7 @@ export default function AdminTimetableCompiler() {
     const response = await fetch('/api/timetable/generate', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'x-user-role': 'admin'
+        'Content-Type': 'application/json'
       }
     });
 

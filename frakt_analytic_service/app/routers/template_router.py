@@ -90,7 +90,7 @@ def create_template(
         required_params=template_data.required_params,
     )
     db.add(new_template)
-    db.commit()
+    db.flush()
     log_event(
         db=db,
         customer_id=customer.id,
@@ -100,6 +100,7 @@ def create_template(
         status_code=201,
         severity=LogSeverity.INFO,
     )
+    db.commit()
     db.refresh(new_template)
 
     logger.info(
@@ -112,7 +113,9 @@ def create_template(
 # SECTION 2B: BULK TEMPLATE RETRIEVAL ENDPOINT
 # =============================================================================
 @router.get("/", response_model=List[TemplateResponse])
+@limiter.limit(get_tier_limit)
 def list_templates(
+    request: Request,
     customer: Customer = Depends(get_current_active_customer),
     db: Session = Depends(get_db),
 ):
@@ -164,6 +167,7 @@ def get_template(
 # =============================================================================
 @router.patch("/{template_id}")
 def update_template(
+    request: Request,
     template_id: str,
     update_data: TemplateUpdate,
     customer: Customer = Depends(get_current_active_customer),
@@ -197,6 +201,16 @@ def update_template(
     for key, value in data.items():
         setattr(template, key, value)
 
+    db.commit()
+    log_event(
+        db=db,
+        customer_id=customer.id,
+        action="TEMPLATE_UPDATED",
+        request=request,
+        endpoint=f"/templates/{template_id}",
+        status_code=200,
+        severity=LogSeverity.INFO,
+    )
     db.commit()
     logger.info(f"Template {template_id} updated by user {customer.id}")
     return {"message": "Template updated successfully"}

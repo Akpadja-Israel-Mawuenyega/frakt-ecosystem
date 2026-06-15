@@ -123,9 +123,11 @@ async def generate_svg(
     data.params["points"] = render_points
     final_labels = extend_labels_for_forecast(user_labels, 0)
 
+    customer_id = customer.id
+
     result = db.execute(
         update(Customer)
-        .where(Customer.id == customer.id)
+        .where(Customer.id == customer_id)
         .where(Customer.usage_count < tier_config["quota"])
         .values(usage_count=Customer.usage_count + 1)
     )
@@ -139,6 +141,10 @@ async def generate_svg(
         "metadata": data.metadata,
     }
 
+    # Commit the charge now, before the worker round-trip, so the row-level
+    # lock on `customers` isn't held across an external HTTP call.
+    db.commit()
+
     try:
         response = await worker_client.post("/execute", json=payload, timeout=2.1)
         response.raise_for_status()
@@ -150,18 +156,18 @@ async def generate_svg(
         # 1. Log the CRITICAL event before the API crashes
         log_event(
             db=db,
-            customer_id=customer.id if customer else "ANONYMOUS",
+            customer_id=customer_id,
             action="SANDBOX_EXECUTION_CRASH",
             request=request,
             endpoint=request.url.path,
             status_code=500,
             severity=LogSeverity.CRITICAL,
         )
-        
+
         # 2. REFUND: Roll back the usage_count since the server failed
         db.execute(
             update(Customer)
-            .where(Customer.id == customer.id)
+            .where(Customer.id == customer_id)
             .values(usage_count=Customer.usage_count - 1)
         )
         db.commit()  # Ensure the log is saved before crashing
@@ -177,7 +183,7 @@ async def generate_svg(
 
     log_event(
         db=db,
-        customer_id=customer.id,
+        customer_id=customer_id,
         action="SVG_RENDER_SUCCESS",
         request=request,
         endpoint="/v1/generate",
@@ -256,11 +262,19 @@ async def generate_predictive_svg(
     # AI Method handling: Default to auto if not provided or set to none
     requested_method = data.ai_method if data.ai_method != "none" else "auto"
 
+    ai_results = None
+    # Predictive logic is always executed for this endpoint
+    ai_results = PredictiveEngine.get_trend(raw_points, method=requested_method)
+    if "error" in ai_results:
+        raise HTTPException(status_code=400, detail=ai_results["error"])
+
+    customer_id = customer.id
+
     # Premium endpoint fixed charge
     credits_to_deduct = 2
     result = db.execute(
         update(Customer)
-        .where(Customer.id == customer.id)
+        .where(Customer.id == customer_id)
         .where(Customer.usage_count + credits_to_deduct <= tier_config["quota"])
         .values(usage_count=Customer.usage_count + credits_to_deduct)
     )
@@ -269,12 +283,6 @@ async def generate_predictive_svg(
         raise HTTPException(
             status_code=403, detail="Quota exceeded during transaction."
         )
-
-    ai_results = None
-    # Predictive logic is always executed for this endpoint
-    ai_results = PredictiveEngine.get_trend(raw_points, method=requested_method)
-    if "error" in ai_results:
-        raise HTTPException(status_code=400, detail=ai_results["error"])
 
     # Extract raw data for scaling
     forecast_y_raw = ai_results.get("forecast_y", []) if ai_results else []
@@ -325,6 +333,10 @@ async def generate_predictive_svg(
         "metadata": data.metadata,
     }
 
+    # Commit the charge now, before the worker round-trip, so the row-level
+    # lock on `customers` isn't held across an external HTTP call.
+    db.commit()
+
     try:
         response = await worker_client.post("/execute", json=payload, timeout=2.1)
         response.raise_for_status()
@@ -336,21 +348,21 @@ async def generate_predictive_svg(
         # 1. Log the CRITICAL event before the API crashes
         log_event(
             db=db,
-            customer_id=customer.id if customer else "ANONYMOUS",
+            customer_id=customer_id,
             action="SANDBOX_EXECUTION_CRASH",
             request=request,
             endpoint=request.url.path,
             status_code=500,
             severity=LogSeverity.CRITICAL,
         )
-        
+
         # 2. REFUND: Roll back the usage_count since the server failed
         db.execute(
             update(Customer)
-            .where(Customer.id == customer.id)
+            .where(Customer.id == customer_id)
             .values(usage_count=Customer.usage_count - credits_to_deduct)
         )
-        
+
         db.commit()  # Ensure the log is saved before crashing
         # 3. Re-raise the exception to trigger global error handlers and return a 500 response
         logger.error(f"Worker Failure: {str(e)}")
@@ -366,7 +378,7 @@ async def generate_predictive_svg(
 
     log_event(
         db=db,
-        customer_id=customer.id,
+        customer_id=customer_id,
         action=f"AI_PREDICTION_{requested_method.upper()}",
         request=request,
         endpoint="/v1/generate-predictive",
@@ -384,5 +396,7 @@ async def generate_predictive_svg(
             "X-AI-Model": (
                 ai_results.get("method", requested_method) if ai_results else "none"
             ),
+            "X-AI-Confidence": str(ai_results.get("confidence", 0)) if ai_results else "0",
+            "X-AI-Is-Growth": str(ai_results.get("is_growth", False)).lower() if ai_results else "false",
         },
     )

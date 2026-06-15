@@ -1,3 +1,45 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+}
+
+@layer utilities {
+  .bg-app-gradient {
+    background-image: radial-gradient(
+        circle at top right,
+        rgba(99, 102, 241, 0.08),
+        transparent 40%
+      ),
+      radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.06), transparent 40%),
+      theme("colors.slate.50");
+  }
+
+  .dark .bg-app-gradient {
+    background-image: radial-gradient(
+        circle at top right,
+        rgba(99, 102, 241, 0.16),
+        transparent 40%
+      ),
+      radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.12), transparent 40%),
+      theme("colors.slate.950");
+  }
+
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent;
+  }
+
+  .animation-delay-100 {
+    animation-delay: 0.1s;
+  }
+  .animation-delay-200 {
+    animation-delay: 0.2s;
+  }
+  .animation-delay-300 {
+    animation-delay: 0.3s;
+  }
+}

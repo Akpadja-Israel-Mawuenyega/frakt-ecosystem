@@ -10,3 +10,4 @@ numpy==2.3.5
 python-dotenv==1.0.1
 slowapi==0.1.9
 httpx==0.28.1
+RestrictedPython==8.2

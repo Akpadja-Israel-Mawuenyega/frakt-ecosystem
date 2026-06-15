@@ -8,6 +8,7 @@ import connectDB from '@/lib/db';
 
 import User from '@/models/User';
 import StudentProfile from '@/models/StudentProfile';
+import { logEvent } from '@/lib/audit/logEvent';
 
 /**
  * ───────────────────────────── AUTH CONFIG ─────────────────────────────
@@ -107,7 +108,7 @@ export const authOptions = {
         );
 
         if (!passwordValid) {
-          throw new Error('CredentialsSignin.');
+          throw new Error('Invalid email or password.');
         }
 
         /**
@@ -227,6 +228,22 @@ export const authOptions = {
       }
 
       return session;
+    }
+  },
+
+  /**
+   * ───────────────────────────── EVENTS ─────────────────────────────
+   * Side-effect hooks that fire after the callbacks above resolve.
+   * Used here to feed the native audit trail / traffic analytics.
+   */
+  events: {
+    async signIn({ user }) {
+      await logEvent({
+        userId: user.id,
+        action: 'USER_LOGIN',
+        endpoint: '/api/auth/callback',
+        statusCode: 200,
+      });
     }
   },
 

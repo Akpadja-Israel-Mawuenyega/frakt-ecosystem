@@ -7,6 +7,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import connectDB from "@/lib/db";
 
 import StudySession from "@/models/StudySession";
+import { logEvent } from "@/lib/audit/logEvent";
 
 /**
  * ───────────────────────────── STUDY SESSION API ─────────────────────────────
@@ -219,6 +220,17 @@ export async function POST(request) {
 
         source: "manual",
       });
+
+    /**
+     * ───────────────────────── AUDIT TRAIL ─────────────────────────
+     */
+
+    await logEvent({
+      userId: session.user.id,
+      action: "STUDY_SESSION_CREATED",
+      request,
+      statusCode: 201,
+    });
 
     /**
      * ───────────────────────── SUCCESS RESPONSE ─────────────────────────

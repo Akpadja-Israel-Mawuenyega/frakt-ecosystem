@@ -39,7 +39,7 @@ def log_event(
     """
     # Extract metadata safely from the Request object
     ip_addr = request.client.host if request else "0.0.0.0"
-    user_agent = request.headers.get("user-agent", "Unknown")
+    user_agent = request.headers.get("user-agent", "Unknown") if request else "Unknown"
     path = request.url.path if request else endpoint
 
     new_log = AuditLog(

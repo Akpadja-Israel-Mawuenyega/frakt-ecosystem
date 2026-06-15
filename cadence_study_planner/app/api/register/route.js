@@ -8,6 +8,7 @@ import connectDB from '@/lib/db';
 
 import User from '@/models/User';
 import StudentProfile from '@/models/StudentProfile';
+import { logEvent } from '@/lib/audit/logEvent';
 
 /**
  * ───────────────────────────── REGISTER ROUTE ─────────────────────────────
@@ -157,6 +158,17 @@ export async function POST(request) {
       learningResources: [],
 
       preferences: {}
+    });
+
+    /**
+     * ───────────────────────── AUDIT TRAIL ─────────────────────────
+     */
+
+    await logEvent({
+      userId: user._id,
+      action: 'USER_REGISTERED',
+      request,
+      statusCode: 201,
     });
 
     /**

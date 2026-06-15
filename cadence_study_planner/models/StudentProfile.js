@@ -41,7 +41,7 @@ const LearningResourceSchema = new mongoose.Schema({
     default: Date.now
   }
 
-}, { _id: false });
+});
 
 /**
  * ───────────────────────────── STUDENT PROFILE ──────────────────────────────

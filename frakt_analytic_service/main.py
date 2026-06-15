@@ -37,6 +37,7 @@ from app.audit import log_event
 from app.middleware.error_handlers import register_error_handlers
 from app.routers.generation_router import router as generation_router
 from app.routers.template_router import router as template_router
+from app.routers.customer_router import router as customer_router
 
 # -----------------------------
 
@@ -197,14 +198,16 @@ async def audit_telemetry_middleware(request: Request, call_next):
     """
     response = await call_next(request)
 
-    # customer is injected into request.state by the auth dependency.
-    # Unauthenticated routes (e.g. /docs) will have no customer — skip logging.
-    customer = getattr(request.state, "customer", None)
+    # customer_id is injected into request.state by the auth dependency as a
+    # plain string. Unauthenticated routes (e.g. /docs) will have none — skip
+    # logging. (Read as a plain value, not via the ORM `customer` instance,
+    # which may already be detached from its session by this point.)
+    customer_id = getattr(request.state, "customer_id", None)
 
-    if customer:
+    if customer_id:
         response.background = BackgroundTask(
             _write_audit_log,
-            customer_id=customer.id,
+            customer_id=customer_id,
             method=request.method,
             path=request.url.path,
             status_code=response.status_code,
@@ -219,6 +222,7 @@ async def audit_telemetry_middleware(request: Request, call_next):
 
 app.include_router(generation_router, prefix="/v1")
 app.include_router(template_router, prefix="/v1")
+app.include_router(customer_router, prefix="/v1")
 
 
 if __name__ == "__main__":

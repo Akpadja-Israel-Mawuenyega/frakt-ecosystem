@@ -12,6 +12,8 @@ import StudentProfile from "@/models/StudentProfile";
 
 import StudySession from "@/models/StudySession";
 
+import { logEvent } from "@/lib/audit/logEvent";
+
 /**
  * ───────────────────────────── OPENAI CLIENT ─────────────────────────────
  *
@@ -247,7 +249,7 @@ const buildDifficultyHints = (courses = []) => {
  *        ↓
  * Dashboard rendering
  */
-export async function POST() {
+export async function POST(request) {
   try {
     /**
      * ───────────────────────── DATABASE ─────────────────────────
@@ -367,6 +369,20 @@ export async function POST() {
       );
 
     /**
+     * ───────────────────────── LEARNING RESOURCES ─────────────────────────
+     *
+     * Surfaces titles of academic material the student has saved
+     * (e.g. OpenAlex papers via /api/scholar/search) so the planner
+     * can bias session topics toward what they're already reading.
+     */
+
+    const resourceContext =
+      student.learningResources
+        ?.map((resource) => `- ${resource.title} (${resource.type})`)
+        .join("\n") ||
+      "No additional learning resources provided.";
+
+    /**
      * ───────────────────────── AI SYSTEM PROMPT ─────────────────────────
      *
      * IMPORTANT:
@@ -393,6 +409,7 @@ RULES:
 - Include revision diversity across the week.
 - Avoid duplicate session titles.
 - Make titles concise and actionable.
+- Where relevant, align session topics with the student's saved learning resources.
 
 Each session must include:
 - courseCode
@@ -434,6 +451,9 @@ ${courseContext}
 
 Difficulty Heuristics:
 ${difficultyHints}
+
+Saved Learning Resources:
+${resourceContext}
 
 Return JSON in this structure:
 
@@ -633,6 +653,17 @@ Return JSON in this structure:
           }
         )
       );
+
+    /**
+     * ───────────────────────── AUDIT TRAIL ─────────────────────────
+     */
+
+    await logEvent({
+      userId: session.user.id,
+      action: "AI_PLAN_GENERATED",
+      request,
+      statusCode: 201,
+    });
 
     /**
      * ───────────────────────── SUCCESS RESPONSE ─────────────────────────

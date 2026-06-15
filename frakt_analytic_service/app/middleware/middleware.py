@@ -144,5 +144,11 @@ async def get_current_active_customer(
 
     # This makes the 'customer' available to your Audit Middleware in main.py
     request.state.customer = customer
-    
+
+    # Captured now (while the session is fresh) so the audit middleware can
+    # log it after the response — by then `customer` may be detached from
+    # its session (e.g. after a route's db.commit()) and `.id` would raise
+    # DetachedInstanceError.
+    request.state.customer_id = str(customer.id)
+
     return customer

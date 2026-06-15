@@ -13,32 +13,38 @@ import mongoose from 'mongoose';
  */
 
 /**
- * Mongoose Schema blueprint governing administrative schedule demands fed into the greedy conflict constraint resolver.
+ * Mongoose Schema blueprint governing administrative schedule demands fed into the genetic algorithm scheduling engine.
  * @type {mongoose.Schema<CourseDemand>}
  */
+/**
+ * Valid cohort codes, shared with the admin Course Demands API/UI so the
+ * dropdown and validation always match this schema's enum.
+ */
+export const COHORT_OPTIONS = ['L400_CS_A', 'L400_CS_B', 'L300_CS_A', 'L300_CS_B'];
+
 const CourseDemandSchema = new mongoose.Schema({
-  courseCode: { 
-    type: String, 
-    required: true, 
-    trim: true 
+  courseCode: {
+    type: String,
+    required: true,
+    trim: true
   },
-  courseName: { 
-    type: String, 
-    required: true 
+  courseName: {
+    type: String,
+    required: true
   },
-  cohort: { 
-    type: String, 
-    required: true, 
-    enum: ['L400_CS_A', 'L400_CS_B', 'L300_CS_A', 'L300_CS_B'] 
+  cohort: {
+    type: String,
+    required: true,
+    enum: COHORT_OPTIONS
   },
-  lecturer: { 
-    type: String, 
-    required: true, 
-    trim: true 
+  lecturer: {
+    type: String,
+    required: true,
+    trim: true
   },
-  weeklySlotsRequired: { 
-    type: Number, 
-    default: 1 
+  weeklySlotsRequired: {
+    type: Number,
+    default: 1
   }
 }, { timestamps: true });
 

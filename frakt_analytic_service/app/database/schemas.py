@@ -13,7 +13,7 @@ Key Architectural Pillars:
 """
 
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Dict, Literal, Optional, Any
 
 
@@ -113,3 +113,33 @@ class TemplateResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CustomerRegisterRequest(BaseModel):
+    """Registration payload for a new Frakt tenant."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    email: EmailStr
+
+
+class CustomerRegisterResponse(BaseModel):
+    """
+    One-time registration response containing the raw API key.
+    Shown once on registration — never retrievable again.
+    """
+
+    message: str
+    customer_id: str
+    api_key: str
+
+
+class UsageResponse(BaseModel):
+    """Current usage telemetry for the authenticated customer."""
+
+    customer_id: str
+    name: str
+    email: str
+    tier: str
+    usage_count: int
+    quota: int
+    is_active: bool

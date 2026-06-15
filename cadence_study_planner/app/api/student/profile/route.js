@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import connectDB from '@/lib/db';
 import StudentProfile from '@/models/StudentProfile';
+import { logEvent } from '@/lib/audit/logEvent';
 
 /**
  * PATCH /api/student/profile
@@ -49,6 +50,13 @@ export async function PATCH(request) {
         { status: 404 }
       );
     }
+
+    await logEvent({
+      userId: session.user.id,
+      action: "PROFILE_UPDATED",
+      request,
+      statusCode: 200,
+    });
 
     return NextResponse.json(
       { success: true, data: updated },
