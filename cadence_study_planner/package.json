@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@next/swc-win32-x64-msvc": "^16.2.7",
@@ -21,7 +23,11 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
     "autoprefixer": "^10.5.0",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.19"
   }

@@ -1,5 +1,5 @@
 import pytest
-from core.generator import generate_svg_from_template
+from worker.generator import generate_svg_from_template
 
 
 def test_complex_line_graph_generation():

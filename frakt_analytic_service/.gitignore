@@ -21,6 +21,9 @@ env/
 htmlcov/
 nosetests.xml
 coverage.xml
+*.db
+tests/output/
+complex_graph.svg
 
 # --- OS / IDE ---
 .DS_Store

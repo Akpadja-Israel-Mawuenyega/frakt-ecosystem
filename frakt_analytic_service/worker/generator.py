@@ -28,7 +28,23 @@ from typing import Dict, Any, Optional
 from concurrent.futures import ProcessPoolExecutor, TimeoutError
 
 from RestrictedPython import compile_restricted, safe_globals, safe_builtins
-from RestrictedPython.Guards import guarded_iter_unpack_sequence
+from RestrictedPython.Guards import (
+    guarded_iter_unpack_sequence,
+    guarded_unpack_sequence,
+)
+
+# RestrictedPython rewrites `x += y` as `x = _inplacevar_('+=', x, y)`.
+# It does not ship a default implementation — we provide a minimal one that
+# covers the operators templates legitimately need.
+def _safe_inplacevar(op, x, y):
+    if op == '+=': return x + y
+    if op == '-=': return x - y
+    if op == '*=': return x * y
+    if op == '/=': return x / y
+    if op == '//=': return x // y
+    if op == '%=': return x % y
+    if op == '**=': return x ** y
+    raise TypeError(f"Unsupported inplace operator in sandbox: {op}")
 
 logger = logging.getLogger("worker")
 
@@ -112,7 +128,11 @@ def _worker_execute(
     restricted_globals = {
         **safe_globals,
         "__builtins__": {**safe_builtins, **ALLOWED_FUNCS},
+        "_getiter_": iter,
+        "_getitem_": lambda ob, index: ob[index],
+        "_inplacevar_": _safe_inplacevar,
         "_iter_unpack_sequence_": guarded_iter_unpack_sequence,
+        "_unpack_sequence_": guarded_unpack_sequence,
         **SAFE_MODULES,
     }
 

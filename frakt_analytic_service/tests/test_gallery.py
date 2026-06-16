@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from core.generator import generate_svg_from_template
+from worker.generator import generate_svg_from_template
 
 
 def test_create_professional_dashboard_optimized():
