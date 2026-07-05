@@ -71,15 +71,16 @@ frakt_microservice/
 │   │   │   ├── customer_router.py   # /v1/customers/* account management
 │   │   │   └── utils.py             # SVG asset stamping, coordinate math
 │   │   └── schemas/                 # Pydantic request/response models
-│   ├── worker/
-│   │   ├── worker.py                # Worker FastAPI service (UDS/TCP)
-│   │   └── generator.py             # RestrictedPython sandbox executor
-│   └── scripts/
-│       └── setup_cadence_integration.py  # Provisions Cadence as a Frakt customer
+│   └── worker/
+│       ├── worker.py                # Worker FastAPI service (UDS/TCP)
+│       └── generator.py             # RestrictedPython sandbox executor
 │
 └── cadence_study_planner/           # Next.js 16 full-stack app
     ├── app/                         # Next.js App Router pages + API routes
     ├── components/                  # React UI components
+    ├── scripts/
+    │   ├── frakt-template.mjs       # Cadence's chart template source (RestrictedPython)
+    │   └── setup-frakt.mjs          # Registers Cadence + template via Frakt's HTTP API
     ├── lib/
     │   ├── scheduler/
     │   │   └── geneticScheduler.js  # Genetic algorithm timetable engine
@@ -976,7 +977,7 @@ The **8-second client timeout** is intentionally larger than Frakt's internal 2-
 
 ### Chart Templates
 
-The chart template used by Cadence is `cadence_line_forecast_v1`. It is created in Frakt's database by the setup script and owned by Cadence's customer account.
+The chart template used by Cadence is `cadence_line_forecast_v1`. Its source lives in Cadence's repo (`cadence_study_planner/scripts/frakt-template.mjs`) and is uploaded once into Frakt's database via the public template API, owned by Cadence's customer account. After that, Cadence only references it by name in `/v1/generate` requests — Frakt itself contains no Cadence-specific code.
 
 The template is a RestrictedPython program that generates a base SVG polyline. It receives:
 
@@ -991,15 +992,13 @@ The Gateway appends the axis scale, point circles, tooltips, and forecast bounda
 
 ### Setup Script
 
-`frakt_analytic_service/scripts/setup_cadence_integration.py` is a one-time provisioning script that:
+`cadence_study_planner/scripts/setup-frakt.mjs` is a one-time provisioning script that treats Frakt as an ordinary third-party API — it only sends HTTP requests to the Gateway, never touching Frakt's code or database directly:
 
-1. Connects to Frakt's MySQL database directly.
-2. Creates a new `Customer` record for Cadence (tier: `pro`).
-3. Generates a raw API key, stores only its SHA-256 hash.
-4. Creates the `cadence_line_forecast_v1` `SVGTemplate` owned by that customer.
-5. Prints the generated `FRAKT_API_KEY` and `FRAKT_CHART_TEMPLATE` values for copying into Cadence's `.env.local`.
+1. `POST /v1/customers/register` — creates the Cadence tenant; Frakt returns the raw API key exactly once (only its SHA-256 hash is stored).
+2. `POST /v1/templates/` (authenticated with that key) — uploads the `cadence_line_forecast_v1` template into Frakt's database, owned by the Cadence customer.
+3. Prints the `FRAKT_API_URL`, `FRAKT_API_KEY`, and `FRAKT_CHART_TEMPLATE` values for copying into Cadence's `.env.local`.
 
-This script is idempotent — re-running it detects the existing customer by a well-known identifier and skips re-creation, only reprinting the stored credentials (though the raw key is unrecoverable after first run — a new key must be rotated if lost).
+Run it with `npm run setup:frakt` (or `node scripts/setup-frakt.mjs`) from `cadence_study_planner/`, with `FRAKT_BASE_URL` pointing at the running Gateway. Re-running it against the same email fails with `409` because Frakt never re-issues a raw key — rotate via `POST /v1/customers/rotate-key` instead, or register with a fresh `CADENCE_CUSTOMER_EMAIL`.
 
 ---
 
@@ -1044,8 +1043,11 @@ The Gateway's CORS middleware is configured to allow only `http://localhost:3000
 | `DOCKER_DATABASE_URL` | SQLAlchemy URL inside Docker | `mysql+pymysql://user:pass@host.docker.internal:3306/frakt_db` |
 | `LOG_DIR` | Directory for rotating log files | `logs` |
 | `GATEWAY_LOG_FILE` | Log filename | `frakt_gateway.log` |
-| `WORKER_URL` | Override Worker base URL (optional) | `http://127.0.0.1:8008` |
+| `WORKER_URL` | Override Worker address (optional). Accepts `host:port`, a full `http(s)://` URL, or a UDS path | `http://127.0.0.1:8008` |
 | `WORKER_SOCKET_PATH` | Override UDS path (optional) | `/tmp/sockets/worker.sock` |
+| `DATABASE_URL` | Single connection string for managed platforms — overrides the two URLs above; `postgres://` and `mysql://` schemes are normalized automatically | `postgresql://user:pass@host/frakt` |
+| `WORKER_AUTH_TOKEN` | Shared secret between Gateway and Worker. When set on the Worker, `/execute` rejects requests without a matching `x-worker-token` header; set the same value on the Gateway | `openssl rand -hex 32` |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins for the Gateway | `https://cadence.onrender.com` |
 
 ### Cadence (`cadence_study_planner/.env.local`)
 
@@ -1103,6 +1105,62 @@ volumes:
 - Both containers run as non-root users. The shared group (gid 1001) grants mutual socket access without world-readable permissions.
 - The `tmpfs` socket volume is never written to disk, preventing socket file persistence after container shutdown.
 
+### Production Deployment (Render + Vercel)
+
+The two Frakt services deploy on **Render** (they are long-lived processes — the Gateway holds a connection pool, the Worker keeps a warm sandbox ProcessPool — so they can't run serverless). Cadence deploys on **Vercel**, Next.js's native platform: no idle spin-down, per-branch preview deploys, and zero build configuration. The two platforms only communicate over public HTTPS, exactly like the local setup.
+
+#### Frakt on Render
+
+`render.yaml` at the repo root is a Render Blueprint:
+
+| Render service | Source | Runs |
+|---|---|---|
+| `frakt-worker` | `frakt_analytic_service/` | `uvicorn worker.worker:app` |
+| `frakt-gateway` | `frakt_analytic_service/` | `uvicorn main:app` |
+| `frakt-db` | — | Managed Postgres (SQLAlchemy models are dialect-agnostic; MySQL is only required if you bring your own) |
+
+- The Gateway reaches the Worker through Render's private network — `WORKER_URL` is wired to the Worker's internal `host:port` by the blueprint, so sandbox traffic never leaves the region.
+- Because the Worker is a routable service (rather than a Unix socket), the blueprint generates a `WORKER_AUTH_TOKEN` shared secret; the Worker rejects any `/execute` call without it.
+
+**Steps:**
+
+1. Push this repo to GitHub.
+2. In the Render dashboard: **New + → Blueprint**, select the repo. Render reads `render.yaml`; `ALLOWED_ORIGINS` can stay blank (Cadence calls Frakt server-side, so CORS never applies).
+3. Deploy. Wait for `frakt-gateway` and `frakt-worker` to report healthy (`/health`).
+4. Provision the Cadence tenant against the deployed gateway from your machine:
+
+   ```bash
+   cd cadence_study_planner
+   FRAKT_BASE_URL=https://frakt-gateway-XXXX.onrender.com npm run setup:frakt
+   ```
+
+   Save the printed `FRAKT_API_KEY` — it is shown exactly once, and Vercel will need it below.
+
+**Free-tier caveats:** Render services spin down after ~15 minutes of inactivity, so the first chart request after a quiet period pays a cold start (the Gateway refunds any charge if the Worker times out during one). The free Postgres instance expires after 90 days — upgrade or migrate before then.
+
+#### Cadence on Vercel
+
+No `vercel.json` is needed — Vercel detects Next.js automatically. `lib/db.js` already caches the Mongoose connection globally, which is the pattern Vercel's serverless functions require.
+
+1. In the Vercel dashboard: **Add New → Project**, import the GitHub repo, and set **Root Directory** to `cadence_study_planner`.
+2. Add the environment variables (Project → Settings → Environment Variables):
+
+   | Variable | Value |
+   |---|---|
+   | `MONGODB_URI` | Your Atlas connection string |
+   | `NEXTAUTH_URL` / `NEXT_PUBLIC_BASE_URL` | The Vercel production URL (e.g. `https://cadence.vercel.app`) |
+   | `NEXTAUTH_SECRET` | `openssl rand -hex 32` |
+   | `AI_PROVIDER` / `GROQ_API_KEY` | `groq` / your key |
+   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional OAuth credentials |
+   | `ACADEMIC_YEAR` / `SEMESTER` | e.g. `2025/2026` / `2` |
+   | `FRAKT_API_URL` | `https://frakt-gateway-XXXX.onrender.com` |
+   | `FRAKT_API_KEY` | The key printed by `npm run setup:frakt` |
+   | `FRAKT_CHART_TEMPLATE` | `cadence_line_forecast_v1` |
+
+3. Deploy. If Google OAuth is enabled, add `https://<your-domain>/api/auth/callback/google` to the authorized redirect URIs in the Google Cloud console.
+
+**Note:** Vercel's Hobby tier is licensed for non-commercial use; upgrade to Pro for anything commercial.
+
 ---
 
 ## Development Setup
@@ -1127,9 +1185,6 @@ python main.py
 
 # Start worker in a separate terminal (port 8008 on Windows)
 cd worker && python worker.py
-
-# Provision Cadence integration (after both services are running)
-python -m scripts.setup_cadence_integration
 ```
 
 ### Cadence
@@ -1139,6 +1194,10 @@ cd cadence_study_planner
 
 # Install dependencies
 npm install
+
+# Provision the Frakt integration (with the Frakt gateway running):
+# registers Cadence as a customer and stores the chart template in Frakt's DB
+npm run setup:frakt
 
 # Configure environment
 cp .env.example .env.local

@@ -8,10 +8,13 @@
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "setup:frakt": "node scripts/setup-frakt.mjs"
+  },
+  "optionalDependencies": {
+    "@next/swc-win32-x64-msvc": "^16.2.7"
   },
   "dependencies": {
-    "@next/swc-win32-x64-msvc": "^16.2.7",
     "bcryptjs": "^3.0.3",
     "lucide-react": "^1.18.0",
     "mongoose": "^9.6.3",

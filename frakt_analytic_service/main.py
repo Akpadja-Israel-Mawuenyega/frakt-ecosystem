@@ -17,6 +17,8 @@ Key Architectural Pillars:
     frontend integration and backward compatibility.
 """
 
+import os
+
 import uvicorn
 import httpx
 from fastapi import FastAPI, Request
@@ -110,13 +112,27 @@ async def lifespan(app: FastAPI):
 
     worker_addr = get_socket_path()
 
-    if "/" in worker_addr or "\\" in worker_addr:
+    # When the worker is deployed as a separate networked service (e.g. on
+    # Render), WORKER_AUTH_TOKEN is the shared secret it requires on /execute.
+    worker_token = os.environ.get("WORKER_AUTH_TOKEN")
+    worker_headers = {"x-worker-token": worker_token} if worker_token else {}
+
+    if worker_addr.startswith(("http://", "https://")):
+        # REMOTE: worker deployed as its own service, reached over the network
+        app.state.worker_client = httpx.AsyncClient(
+            base_url=worker_addr,
+            timeout=30.0,
+            headers=worker_headers,
+        )
+        logger.info(f"IPC Bridge established via HTTP: {worker_addr}")
+    elif "/" in worker_addr or "\\" in worker_addr:
         # PRODUCTION / LINUX: Unix Domain Socket — lower latency, no TCP overhead
         transport = httpx.AsyncHTTPTransport(uds=worker_addr)
         app.state.worker_client = httpx.AsyncClient(
             transport=transport,
             base_url="http://worker-internal",  # Dummy host required for UDS
             timeout=30.0,
+            headers=worker_headers,
         )
         logger.info(f"IPC Bridge established via UDS: {worker_addr}")
     else:
@@ -124,6 +140,7 @@ async def lifespan(app: FastAPI):
         app.state.worker_client = httpx.AsyncClient(
             base_url=f"http://{worker_addr}",
             timeout=30.0,
+            headers=worker_headers,
         )
         logger.info(f"IPC Bridge established via TCP: {worker_addr}")
 
@@ -156,10 +173,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS — restrict to known consumers in production.
 # ⚠️ allow_origins=["*"] with allow_credentials=True is rejected by browsers.
-#    Replace the origins list with your actual frontend domain before deploying.
+#    Set ALLOWED_ORIGINS to a comma-separated list of frontend domains in prod,
+#    e.g. ALLOWED_ORIGINS=https://cadence.onrender.com,https://cadence.app
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # TODO: set production domain via env var
+    allow_origins=[
+        origin.strip()
+        for origin in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
@@ -223,6 +245,12 @@ async def audit_telemetry_middleware(request: Request, call_next):
 app.include_router(generation_router, prefix="/v1")
 app.include_router(template_router, prefix="/v1")
 app.include_router(customer_router, prefix="/v1")
+
+
+@app.get("/health")
+async def health():
+    """Liveness probe for load balancers / Render health checks."""
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

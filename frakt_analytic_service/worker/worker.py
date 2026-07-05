@@ -17,7 +17,10 @@ Key Architectural Pillars:
     and TCP-based local communication.
 """
 
-from fastapi import FastAPI, HTTPException
+import hmac
+import os
+
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -78,13 +81,29 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Frakt Sandbox Worker", lifespan=lifespan)
 
+# Shared secret required on /execute when the worker is reachable over a real
+# network (separate deployment) instead of a private UDS/loopback channel.
+# Unset = open, preserving the local UDS/loopback workflow.
+WORKER_AUTH_TOKEN = os.environ.get("WORKER_AUTH_TOKEN")
+
+
+@app.get("/health")
+def health():
+    """Liveness probe for load balancers / Render health checks."""
+    return {"status": "ok"}
+
 
 @app.post("/execute")
-def execute(req: ExecutionRequest):
+def execute(req: ExecutionRequest, x_worker_token: Optional[str] = Header(default=None)):
     """
     Entry point for sandboxed execution.
     Dispatches to a sub-process with a 2.0s hardware timeout.
     """
+    if WORKER_AUTH_TOKEN and not hmac.compare_digest(
+        x_worker_token or "", WORKER_AUTH_TOKEN
+    ):
+        raise HTTPException(status_code=401, detail="Invalid worker token.")
+
     try:
         svg_output = generate_svg_from_template(
             template_code=req.template_code, params=req.params, metadata=req.metadata

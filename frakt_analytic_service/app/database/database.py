@@ -18,17 +18,32 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 LOCAL_DB_URL = os.environ.get("LOCAL_DATABASE_URL")
 DOCKER_DB_URL = os.environ.get("DOCKER_DATABASE_URL")
+EXPLICIT_DB_URL = os.environ.get("DATABASE_URL")
 
 # 2. Logic: If we are in Docker, 'DOCKER_ENVIRONMENT' will be True
 # (We set this in the docker-compose.yml file)
 IS_DOCKER = os.environ.get("DOCKER_ENVIRONMENT", "false").lower() == "true"
 
-if IS_DOCKER:
+if EXPLICIT_DB_URL:
+    # Managed platforms (Render, Railway, Heroku, ...) inject a single
+    # DATABASE_URL — it wins over the local/docker split when present.
+    DATABASE_URL = EXPLICIT_DB_URL
+    logger.info("Sovereign Gateway: Running in MANAGED mode (DATABASE_URL).")
+elif IS_DOCKER:
     DATABASE_URL = DOCKER_DB_URL
     logger.info("Sovereign Gateway: Running in DOCKER mode.")
 else:
     DATABASE_URL = LOCAL_DB_URL
     logger.info("Sovereign Gateway: Running in NATIVE mode.")
+
+# Normalize scheme shorthands to explicit SQLAlchemy driver URLs:
+# Render/Heroku emit 'postgres://', and a bare 'mysql://' would pick the
+# absent MySQLdb driver instead of PyMySQL.
+if DATABASE_URL:
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
+    elif DATABASE_URL.startswith("mysql://"):
+        DATABASE_URL = "mysql+pymysql://" + DATABASE_URL[len("mysql://"):]
 
 # 3. Failsafe
 if not DATABASE_URL:

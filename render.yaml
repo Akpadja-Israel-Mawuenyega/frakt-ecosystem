@@ -1,0 +1,79 @@
+# Render Blueprint — deploys the two Frakt services of this repo:
+#
+#   frakt-worker      RestrictedPython sandbox executor (FastAPI)
+#   frakt-gateway     Multi-tenant SVG generation API (FastAPI + Postgres)
+#
+# Cadence (the Next.js study planner) deploys on Vercel — see README.md →
+# "Deployment". It talks to frakt-gateway over public HTTPS like any other
+# Frakt customer, so it doesn't need to live on the same platform.
+#
+# Apply this from the Render dashboard: New + → Blueprint → point at this repo.
+# See README.md for the post-deploy provisioning step (running Cadence's
+# setup-frakt script to mint the FRAKT_API_KEY).
+#
+# Notes:
+# - The gateway reaches the worker over Render's private network
+#   (WORKER_URL = internal host:port), so worker traffic never leaves the
+#   region. The worker additionally requires the shared WORKER_AUTH_TOKEN
+#   on /execute since it is a routable service here, unlike the local
+#   Unix-socket setup.
+# - Free-tier services spin down when idle; the first chart request after a
+#   quiet period will be slow (cold start) and may time out once before
+#   succeeding. Upgrade the plans to keep instances warm.
+
+databases:
+  - name: frakt-db
+    plan: free
+    databaseName: frakt
+    user: frakt
+
+services:
+  # ───────────────────────── Frakt Sandbox Worker ─────────────────────────
+  - type: web
+    name: frakt-worker
+    runtime: python
+    plan: free
+    rootDir: frakt_analytic_service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn worker.worker:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4
+      - key: WORKER_AUTH_TOKEN
+        generateValue: true
+
+  # ───────────────────────── Frakt API Gateway ────────────────────────────
+  - type: web
+    name: frakt-gateway
+    runtime: python
+    plan: free
+    rootDir: frakt_analytic_service
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: frakt-db
+          property: connectionString
+      # Internal address of the worker (host:port on Render's private network).
+      # main.py prefixes plain host:port values with http:// automatically.
+      - key: WORKER_URL
+        fromService:
+          type: web
+          name: frakt-worker
+          property: hostport
+      # Same generated secret the worker enforces on /execute.
+      - key: WORKER_AUTH_TOKEN
+        fromService:
+          type: web
+          name: frakt-worker
+          envVarKey: WORKER_AUTH_TOKEN
+      # Comma-separated browser origins allowed by CORS (e.g. Cadence's Vercel
+      # domain). Server-to-server calls (Cadence's API routes) are unaffected;
+      # only needed if a browser ever calls Frakt directly.
+      - key: ALLOWED_ORIGINS
+        sync: false
