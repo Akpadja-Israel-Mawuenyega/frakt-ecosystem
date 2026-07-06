@@ -44,7 +44,8 @@ class TestGenerationIsolation:
     ):
         """
         Customer A holds a valid API key, but the template is owned by Customer B.
-        The generation router checks owner_id and must return 403.
+        The generation router's tenant-scoped lookup must not find it, and the
+        404 must be indistinguishable from a template that doesn't exist at all.
         """
         customer_a, key_a = _make_customer(db_session, "Alice", "alice@example.com")
         customer_b, _ = _make_customer(db_session, "Bob", "bob@example.com")
@@ -60,7 +61,34 @@ class TestGenerationIsolation:
             headers={"x-api-key": key_a},
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 404
+
+    @pytest.mark.parametrize("endpoint", ["/v1/generate", "/v1/generate-predictive"])
+    def test_same_template_name_across_tenants_resolves_to_own_copy(
+        self, client, db_session, endpoint
+    ):
+        """
+        Regression: two tenants may each own a template with the same name
+        (uq_owner_template). A name-only lookup used to raise
+        MultipleResultsFound -> 503. The scoped lookup must resolve to the
+        caller's own copy and render successfully.
+        """
+        customer_a, key_a = _make_customer(db_session, "Alice", "alice@example.com")
+        customer_b, _ = _make_customer(db_session, "Bob", "bob@example.com")
+        _make_template(db_session, customer_a.id, "shared_name_chart")
+        _make_template(db_session, customer_b.id, "shared_name_chart")
+        db_session.commit()
+
+        response = client.post(
+            endpoint,
+            json={
+                "template_name": "shared_name_chart",
+                "params": {"points": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]},
+            },
+            headers={"x-api-key": key_a},
+        )
+
+        assert response.status_code == 200
 
     def test_unknown_template_name_returns_404(self, client, db_session, test_customer):
         _, key = test_customer

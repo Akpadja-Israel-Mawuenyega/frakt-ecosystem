@@ -25,7 +25,7 @@ invoke templates they explicitly own.
 from httpx import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import update
+from sqlalchemy import or_, update
 
 from app.configs.limiter_config import limiter
 from app.configs.logging_config import logger
@@ -82,8 +82,8 @@ async def generate_svg(
         Response: Raw SVG XML with no-cache headers.
 
     Raises:
-        HTTPException: 403 (Quota Exceeded/Access Denied),
-                       404 (Template Not Found),
+        HTTPException: 403 (Quota Exceeded),
+                       404 (Template not found or owned by another tenant),
                        400 (Sandbox execution failure).
     """
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
@@ -91,16 +91,25 @@ async def generate_svg(
     if customer.usage_count >= tier_config["quota"]:
         raise HTTPException(status_code=403, detail="Quota exceeded.")
 
+    # Template names are only unique per owner (uq_owner_template), so the
+    # lookup must be tenant-scoped: the customer's own template or a public
+    # one (owner_id NULL), never another tenant's. Owned templates shadow
+    # public ones with the same name. A foreign template is indistinguishable
+    # from a missing one (404) so existence isn't leaked across tenants.
     template = (
         db.query(SVGTemplate)
-        .filter(SVGTemplate.template_name == data.template_name)
-        .one_or_none()
+        .filter(
+            SVGTemplate.template_name == data.template_name,
+            or_(
+                SVGTemplate.owner_id == customer.id,
+                SVGTemplate.owner_id.is_(None),
+            ),
+        )
+        .order_by(SVGTemplate.owner_id.is_(None))
+        .first()
     )
     if not template:
         raise HTTPException(status_code=404, detail="Template not found.")
-
-    if template.owner_id is not None and template.owner_id != customer.id:
-        raise HTTPException(status_code=403, detail="Private template access denied.")
 
     raw_points = data.params.get("points", [])
     history_count = len(raw_points)
@@ -233,9 +242,9 @@ async def generate_predictive_svg(
         HTTPException:
             - 400: Prediction Engine failure (e.g., insufficient data points
                    for the requested AI method).
-            - 403: Quota exceeded or attempted access to a private template
-                   owned by another customer.
-            - 404: The specified 'template_name' does not exist in the database.
+            - 403: Quota exceeded.
+            - 404: The specified 'template_name' does not exist for this
+                   tenant (missing, or owned by another customer).
             - 500: Sandbox execution timeout or critical worker subsystem failure.
     """
     tier_config = TIER_LIMITS.get(customer.tier, TIER_LIMITS["free"])
@@ -243,18 +252,21 @@ async def generate_predictive_svg(
     if customer.usage_count >= tier_config["quota"]:
         raise HTTPException(status_code=403, detail="Quota exceeded.")
 
+    # Tenant-scoped lookup — see the comment in generate_svg above.
     template = (
         db.query(SVGTemplate)
-        .filter(SVGTemplate.template_name == data.template_name)
-        .one_or_none()
+        .filter(
+            SVGTemplate.template_name == data.template_name,
+            or_(
+                SVGTemplate.owner_id == customer.id,
+                SVGTemplate.owner_id.is_(None),
+            ),
+        )
+        .order_by(SVGTemplate.owner_id.is_(None))
+        .first()
     )
     if not template:
         raise HTTPException(status_code=404, detail="Template not found.")
-
-    if template.owner_id and template.owner_id != customer.id:
-        raise HTTPException(
-            status_code=403, detail="Access denied to private template."
-        )
 
     raw_points = data.params.get("points", [])
     history_count = len(raw_points)
