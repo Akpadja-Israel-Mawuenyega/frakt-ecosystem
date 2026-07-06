@@ -1,4 +1,5 @@
 import NextAuth from 'next-auth';
+import { encode as encodeJwt } from 'next-auth/jwt';
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 
@@ -24,6 +25,21 @@ import { logEvent } from '@/lib/audit/logEvent';
  * User → identity/authentication
  * StudentProfile → academic + AI personalization
  */
+/**
+ * Session lifetimes for the "Remember me" split:
+ *
+ * - Unchecked (and all OAuth logins): the JWT expires after 24 hours of
+ *   inactivity — a security-first default that limits how long a stolen
+ *   or abandoned session stays usable.
+ * - Checked: the JWT lives for 30 days (NextAuth's standard persistence).
+ *
+ * Enforcement lives inside the token's own expiry (see `jwt.encode` below),
+ * so it applies to every `getServerSession` check — clients cannot extend a
+ * session beyond what the server signed.
+ */
+const REMEMBERED_SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 days
+const DEFAULT_SESSION_MAX_AGE = 24 * 60 * 60; // 24 hours
+
 export const authOptions = {
 
   /**
@@ -34,7 +50,39 @@ export const authOptions = {
    * - scalable stateless auth
    */
   session: {
-    strategy: 'jwt'
+    strategy: 'jwt',
+
+    /**
+     * Upper bound — remembered sessions. Non-remembered tokens are cut
+     * shorter at encode time below.
+     */
+    maxAge: REMEMBERED_SESSION_MAX_AGE,
+
+    /**
+     * Re-issue the token every 4 hours of activity, so a non-remembered
+     * session behaves as a 24h *idle* timeout (active users roll forward)
+     * rather than a hard mid-work logout.
+     */
+    updateAge: 4 * 60 * 60
+  },
+
+  /**
+   * Token lifetime is decided per login: the `rememberMe` flag carried in
+   * the token picks the long or short expiry each time it is (re-)signed.
+   */
+  jwt: {
+    maxAge: REMEMBERED_SESSION_MAX_AGE,
+
+    async encode(params) {
+      const remembered = params.token?.rememberMe === true;
+
+      return encodeJwt({
+        ...params,
+        maxAge: remembered
+          ? REMEMBERED_SESSION_MAX_AGE
+          : DEFAULT_SESSION_MAX_AGE
+      });
+    }
   },
 
   /**
@@ -69,6 +117,16 @@ export const authOptions = {
         password: {
           label: 'Password',
           type: 'password'
+        },
+
+        /**
+         * "Remember me" checkbox — "true" opts into the 30-day session;
+         * anything else gets the 24-hour default. Both durations are
+         * server-defined, so the flag can only choose between them.
+         */
+        remember: {
+          label: 'Remember me',
+          type: 'text'
         }
       },
 
@@ -118,7 +176,8 @@ export const authOptions = {
           id: user._id.toString(),
           name: user.name,
           email: user.email,
-          role: user.role
+          role: user.role,
+          rememberMe: credentials.remember === 'true'
         };
       }
     })
@@ -213,6 +272,13 @@ export const authOptions = {
         token.userId = user.id;
 
         token.role = user.role;
+
+        /**
+         * Persisted for the lifetime of the session so every re-encode
+         * (rolling refresh) keeps the duration the user chose at login.
+         * OAuth sign-ins have no checkbox and default to the short session.
+         */
+        token.rememberMe = user.rememberMe === true;
       }
 
       return token;

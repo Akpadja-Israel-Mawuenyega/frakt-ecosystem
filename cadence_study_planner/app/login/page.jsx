@@ -110,6 +110,12 @@ export default function LoginPage() {
 
       password: formData.password,
 
+      /**
+       * Checked → 30-day session; unchecked → 24-hour session.
+       * (See authOptions.jwt.encode.)
+       */
+      remember: rememberMe ? "true" : "false",
+
       redirect: false,
     });
 
